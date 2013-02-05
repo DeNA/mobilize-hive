@@ -3,6 +3,7 @@ require "bundler/gem_tasks"
 require 'mobilize-base/tasks'
 require 'mobilize-ssh/tasks'
 require 'mobilize-hdfs/tasks'
+require 'mobilize-hive/tasks'
 
 #
 # Tests

@@ -1,0 +1,19 @@
+---
+development:
+  clusters:
+    dev_cluster:
+      exec_path: /path/to/hive
+    dev_cluster_2:
+      exec_path: /path/to/hive
+test:
+  clusters:
+    test_cluster:
+      exec_path: /path/to/hive
+    test_cluster_2:
+      exec_path: /path/to/hive
+production:
+  clusters:
+    prod_cluster:
+      exec_path: /path/to/hive
+    prod_cluster_2:
+      exec_path: /path/to/hive

@@ -1,4 +1,4 @@
-namespace :mobilize_hdfs do
+namespace :mobilize_hive do
   desc "Set up config and log folders and files"
   task :setup do
     sample_dir = File.dirname(__FILE__) + '/../samples/'
@@ -27,9 +27,9 @@ namespace :mobilize_hdfs do
     if File.exists?(jt_config_file)
       yml_hash = YAML.load_file(jt_config_file)
       yml_hash.keys.each do |k|
-        if yml_hash[k]['extensions'] and !yml_hash[k]['extensions'].include?('mobilize-hdfs')
-          puts "adding mobilize-hdfs to jobtracker.yml/#{k}/extensions"
-          yml_hash[k]['extensions'] = yml_hash[k]['extensions'].to_a + ['mobilize-hdfs']
+        if yml_hash[k]['extensions'] and !yml_hash[k]['extensions'].include?('mobilize-hive')
+          puts "adding mobilize-hive to jobtracker.yml/#{k}/extensions"
+          yml_hash[k]['extensions'] = yml_hash[k]['extensions'].to_a + ['mobilize-hive']
         end
       end
       File.open(jt_config_file,"w") {|f| f.print(yml_hash.to_yaml)}
