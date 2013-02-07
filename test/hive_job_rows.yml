@@ -1,11 +1,24 @@
-- name: test_hdfs_1
+---
+- name: hive_test_1
   active: true
   trigger: once
   status: ""
-  stage1: hdfs.write target:"/user/mobilize/test/test_hdfs_1.out", 
-            source:"Runner_mobilize(test)/test_hdfs_1.in"
-  stage2: hdfs.copy source:"/user/mobilize/test/test_hdfs_1.out", 
-            target:"test_cluster_2/user/mobilize/test/test_hdfs_copy.out",
-  stage3: hdfs.read source:"/user/mobilize/test/test_hdfs_1_copy.out"
-  stage4: gsheet.write source:"hdfs://test_cluster_2/user/mobilize/test/test_hdfs_1_copy.out", 
-            target:"Runner_mobilize(test)/test_hdfs_1_copy.out"
+  stage1: hive.write target:"mobilize/hive_test_1/date/product", 
+            source:"Runner_mobilize(test)/test_hive_1.in", schema:"hive_test_1.schema"
+  stage2: hive.run source:"hive_test_1.hql" 
+  stage3: hive.run cmd:"show databases"
+  stage4: gsheet.write source:"stage2"  target:"hive_test_1_stage_2.out"
+  stage5: gsheet.write source:"stage3", target:"hive_test_1_stage_3.out"
+- name: hive_test_2
+  active: true
+  trigger: after hive_test_1
+  status: ""
+  stage1: hive.write source:"hdfs://user/mobilize/test/test_hdfs_1.out", target:"mobilize.hive_test_2"
+  stage2: hive.run cmd:"select * from mobilize.hive_test_2"
+  stage3: gsheet.write source:"stage2", target:"hive_test_2.out"
+- name: hive_test_3
+  active: true
+  trigger: after_hive_test_2
+  status: ""
+  stage1: hive.write source:"mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/date/product"
+  stage2: gsheet.write source:"stage1", target:"hive_test_3.out"

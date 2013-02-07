@@ -99,6 +99,9 @@ The Hive configuration consists of:
 * clusters - this defines aliases for clusters, which are used as
 parameters for Hive stages. They should have the same name as those
 in hadoop.yml. Each cluster has:
+  * max_slots - defines the total number of simultaneous slots to be used for hive jobs
+  * temp_table_db - defines the db which should be used to hold temp
+tables used in partition inserts.
   * exec_path - defines the path to the hive executable
 
 Sample hive.yml:
@@ -108,14 +111,20 @@ Sample hive.yml:
 development:
   clusters:
     dev_cluster:
+      max_slots: 5
+      temp_table_db: mobilize
       exec_path: /path/to/hive
 test:
   clusters:
     test_cluster:
+      max_slots: 5
+      temp_table_db: mobilize
       exec_path: /path/to/hive
 production:
   clusters:
     prod_cluster:
+      max_slots: 5
+      temp_table_db: mobilize
       exec_path: /path/to/hive
 ```
 
@@ -130,31 +139,32 @@ Start
   * cluster and user are optional for all of the below.
     * cluster defaults to the first cluster listed;
     * user is treated the same way as in [mobilize-ssh][mobilize-ssh].
-  * hive.run `source:<gsheet_path>, user:<user>, cluster:<cluster>`, which executes the
-      script in the source sheet and returns any output specified at the
-      end. If the last query is a select statement, column headers will be
+  * hive.run `cmd:<hql> || source:<gsheet_path>, user:<user>, cluster:<cluster>`, which executes the
+      script in the cmd or source sheet and returns any output specified at the
+      end. If the cmd or last query in source is a select statement, column headers will be
       returned as well.
-  * hive.write `source:<gsheet_path>, target:<hive_path> user:<user>, cluster:<cluster>`, 
-      which writes the source sheet to the selected hive table. 
-  * The hive_path should be of the form `<hive_db>/<table_name>`,
-or `<hive_db>.<table_name>`.  Partitions can optionally be added to the
-path, as in `<hive_db>/<table_name>/<partition1>/<partition2>`
-  * The hive_full_path is the cluster alias followed by full path on the cluster. 
-    * if a full path is supplied without a preceding cluster alias (e.g. "/user/mobilize/test/test_hive_1.in"), 
-      the output cluster will be used.
-    * The test uses "/user/mobilize/test/test_hive_1.in" for the initial
-write, then "test_cluster_2/user/mobilize/test/test_hive_copy.out" for
-the copy and subsequent read.
-  * both cluster arguments and user are optional. If copying from
-one cluster to another, your source_cluster gateway_node must be able to
-access both clusters.
+  * hive.write `source:<source_path>, target:<hive_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>`, 
+      which writes the source sheet to the selected hive table.
+    * hive_path 
+      * should be of the form `<hive_db>/<table_name>` or `<hive_db>.<table_name>`.  
+    * source:
+      * can be a gsheet_path, hdfs_path, or hive_path (no partitions)
+      * for gsheet and hdfs path, first row is used for column headers
+    * target:
+      * Partitions can optionally be added to the hive_path, as in `<hive_db>/<table_name>/<partition1>/<partition2>`. 
+    * schema:
+      * optional. gsheet_path to column schema. 
+        * two columns: name, datatype
+        * Any columns not defined here will receive "string" as the datatype
+        * partitions are considered columns for this purpose
+        * columns named here that are not in the dataset will be ignored 
 
 <a name='section_Start_Run_Test'></a>
 ### Run Test
 
 To run tests, you will need to 
 
-1) go through the [mobilize-base][mobilize-base] and [mobilize-ssh][mobilize-ssh] tests first
+1) go through [mobilize-base][mobilize-base], [mobilize-ssh][mobilize-ssh], [mobilize-hdfs][mobilize-hdfs] tests first
 
 2) clone the mobilize-hive repository 
 
@@ -162,21 +172,36 @@ From the project folder, run
 
 3) $ rake mobilize_hive:setup
 
-Copy over the config files from the mobilize-base and mobilize-ssh
-projects into the config dir, and populate the values in the hadoop.yml file.
+Copy over the config files from the mobilize-base, mobilize-ssh,
+mobilize-hdfs projects into the config dir, and populate the values in the hive.yml file.
 
-If you don't have two clusters, you can populate test_cluster_2 with the
-same cluster as your first.
+Make sure you use the same names for your hive clusters as you do in
+hadoop.yml.
 
 3) $ rake test
 
-* The test runs a 4 stage job:
-  * test_hive_1:
-    * `hive.write target:"/user/mobilize/test/test_hive_1.out", source:"Runner_mobilize(test)/test_hive_1.in"`
-    * `hive.copy source:"/user/mobilize/test/test_hive_1.out",target:"test_cluster_2/user/mobilize/test/test_hive_1_copy.out"`
-    * `hive.read source:"/user/mobilize/test/test_hive_1_copy.out"`
-    * `gsheet.write source:"stage3", target:"Runner_mobilize(test)/test_hive_1_copy.out"`
-  * at the end of the test, there should be a sheet named "test_hive_1_copy.out" with the same data as test_hive_1.in
+* The test runs these jobs:
+  * hive_test_1:
+    * `hive.write target:"mobilize/hive_test_1/date/product",source:"Runner_mobilize(test)/hive_test_1.in", schema:"hive_test_1.schema`
+    * `hive.run source:"hive_test_1.hql"`
+    * `hive.run cmd:"show databases"`
+    * `gsheet.write source:"stage2", target:"hive_test_1_stage_2.out"`
+    * `gsheet.write source:"stage3", target:"hive_test_1_stage_3.out"`
+    * hive_test_1.hql runs a select statement on the table created in the
+      write command.
+    * at the end of the test, there should be two sheets, one with a
+        sum of the data as in your write query, one with the results of the show
+        databases command.
+  * hive_test_2:
+    * `hive.write source:"hdfs://user/mobilize/test/test_hdfs_1.out", target:"mobilize.hive_test_2"`
+    * `hive.run cmd:"select * from mobilize.hive_test_2"`
+    * `gsheet.write source:"stage2", target:"hive_test_2.out"`
+    * this test uses the output from the first hdfs test as an input, so
+make sure you've run that first.
+  * hive_test_3:
+    * `hive.write source:"hive://mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/date/product"`
+    * `gsheet.write source:"hive://mobilize.hive_test_1_copy", target:"hive_test_3.out"`
+
 
 <a name='section_Meta'></a>
 Meta
