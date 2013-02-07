@@ -12,6 +12,31 @@ module Mobilize
       Hive.config['clusters']
     end
 
+    def Hive.slot_ids(cluster)
+      (1..Hive.clusters[cluster]['max_slots']).to_a.map{|s| "#{cluster}_#{s.to_s}"}
+    end
+
+    def Hive.slot_worker_by_cluster_and_path(cluster,path)
+      working_slots = Mobilize::Resque.jobs('working').map{|j| j['hive_slot'] if (j and j['hive_slot'])}.compact
+      Hive.slot_ids(cluster).each do |slot_id|
+        unless working_slots.include?(slot_id)
+          Mobilize::Resque.set_worker_args_by_path(path,{'hive_slot'=>slot_id})
+          return slot_id
+        end
+      end
+      #return false if none are available
+      return false
+    end
+
+    def Hive.unslot_worker_by_path(path)
+      begin
+        Mobilize::Resque.set_worker_args_by_path(path,{'hive_slot'=>nil})
+        return true
+      rescue
+        return false
+      end
+    end
+
     def Hive.run(command,cluster,user)
       filename = command.to_md5
       file_hash = {filename=>command}
@@ -36,66 +61,19 @@ module Mobilize
       elsif user.nil? and Ssh.su_all_users(node)
         user = u.name
       end
-      tsv = source_dst.read(user)
-      out_string = Hive.write(cluster, db, table, partitions, in_string, user)
+      source_path = source_dst.path
+      #slot worker and run
+      Hive.slot_worker_by_cluster_and_path(cluster,path)
+      out_string = Hive.write(cluster, db, table, partitions, source_path, user)
+      #unslot worker and write result
+      Hive.unslot_worker_by_path(path)
+      out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hive/#{stage_path}/out"
+      Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)
+      out_url
     end
 
-    def Hive.sanitize_table(header_row,rows)
-      sane_header_row = header_row.downcase.split("\t").map{|h|
-        h == 'date' ? 'cdate' : h}.map{|h|
-          h.gsub(/[^a-z0-9_ ]/,"").strip.gsub(" ","_").gsub(/_+/,"_")}.join("\t")
-      sane_tsv = ([sane_header_row] + rows).join("\n").force_encoding("UTF-8")
-      return [sane_header_row, sane_tsv]
-    end
-
-    def Hive.sanitize_hash_array(hash_array,field_defs)
-      hash_array.each_with_index do |row,row_i|
-        row.each do |fname, fvalue|
-          if field_defs[fname] == "string"
-            #do nothing
-          elsif ["null","\\n","nil",""].include?(fvalue.to_s.downcase.strip)
-            #standardize as NULL
-            hash_array[row_i][fname] = "NULL"
-          elsif field_defs[fname]=="bigint"
-            hash_array[row_i][fname] = fvalue.to_i.to_s
-          else
-            raise "Invalid value row #{(row_i+1).to_s} #{fname}: #{fvalue}"
-          end
-        end
-      end
-      return hash_array
-    end
-
-    def Hive.field_defs(hash_array)
-      #create a hash for fields; keys are names and values are datatypes, nil at first
-      field_defs = {}
-      hash_array.first.keys.each{|k| field_defs[k] = nil}
-      #discover datatypes by going through each column
-      hash_array.each do |row|
-        row.each do |fname, fvalue|
-          if field_defs[fname] == "string"
-            #do nothing
-          elsif ["null","\\n","nil",""].include?(fvalue.to_s.downcase.strip)
-            #unknown, do nothing
-          elsif fvalue.is_time?
-            field_defs[fname] = "string"
-          elsif fvalue.to_s.is_fixnum?
-            #do bigint so we don't have to deal w crap
-            field_defs[fname] = "bigint"
-          elsif ['true','false'].include?(fvalue.to_s.downcase.strip)
-            #tinyint(1) (boolean)
-            field_defs[fname] = "string"
-          else
-            field_defs[fname] = "string"
-          end
-        end
-      end
-      #assume string for any fields with no value
-      field_defs.each{|k,v| field_defs[k] = "string" unless field_defs[k]}
-      return field_defs
-    end
-
-    def Hive.write(cluster, db, table, partitions, tsv, user)
+    def Hive.write(cluster, db, table, partitions, source_path, user)
+      
       header_row,rows = tsv.split("\n").instance_eval{|a| [a.first,a[1..-1]]}
       #no rows, no write
       return true if header_row.to_s.length == 0 or rows.nil? or rows.length==0
