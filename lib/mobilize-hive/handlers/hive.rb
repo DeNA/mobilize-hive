@@ -8,6 +8,10 @@ module Mobilize
       Hive.clusters[cluster]['exec_path']
     end
 
+    def Hive.output_db(cluster)
+      Hive.clusters[cluster]['output_db']
+    end
+
     def Hive.clusters
       Hive.config['clusters']
     end
@@ -37,43 +41,109 @@ module Mobilize
       end
     end
 
-    def Hive.run(command,cluster,user)
+    def Hive.table_dir(db,table,cluster,user)
+      describe_sql = "use #{db};describe extended #{table}"
+      describe_output = Hive.run(describe_sql,cluster,user)
+      describe_output.split("location:").last.split(",").first
+    end
+
+    def Hive.run(command,cluster,user,file_hash=nil)
       filename = command.to_md5
-      file_hash = {filename=>command}
+      file_hash||= {}
+      file_hash[filename] = command
       #silent mode so we don't have logs in stderr
       exec_command = "#{Hive.exec_path(cluster)} -S -f #{filename}"
       gateway_node = Hadoop.gateway_node(cluster)
       Ssh.run(gateway_node,exec_command,user,file_hash)
     end
 
-    def Hive.write_by_stage_path(stage_path)
+    def Hive.run_by_stage_path(stage_path)
       s = Stage.where(:path=>stage_path).first
       u = s.job.runner.user
       params = s.params
-      target_path = params['target']
       user = params['user']
-      source_dst = s.source_dsts.first
-      #determine path for target
-      cluster, db, table, partitions = Hive.resolve_path(target_path)
+      cluster = params['cluster'] || Hive.clusters.keys.first
+      node = Hadoop.gateway_node(cluster)
+      node_user = Ssh.host(node)['user']
+      if user and !Ssh.sudoers(node).include?(u.name)
+        raise "#{u.name} does not have su permissions for #{node}"
+      elsif user.nil? and Ssh.su_all_users(node)
+        user = u.name
+      end
+
+      #slot Hive worker if available
+      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
+      return false unless slot_id
+
+      #output table stores stage output
+      output_path = [Hive.output_db,stage_path.gridsafe].join(".")
+      output_db,output_table = output_table.split(".")
+
+      #get hql
+      if params['cmd']
+        command = params['cmd']
+      else
+        #user has passed in a gsheet hql
+        gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
+        #return blank response if there are no slots available
+        return nil unless gdrive_slot
+        source_dst = s.source_dsts(gdrive_slot).first
+        Gdrive.unslot_worker_by_path(stage_path)
+        command = source_dst.read(user)
+      end
+
+      #check for select at end
+      command_array = command.split(";").map{|cc| cc.strip}.reject{|cc| cc.length==0}
+      if command_array.last.downcase.starts_with?("select")
+        #nil if no prior commands
+        prior_hql = command_array[0..-2].join(";") if command_array.length > 1
+        select_hql = command_array.last
+        output_table_hql = ["drop table if exists #{output_path}",
+                            "create table #{output_path} as #{select_hql};"].join(";")
+        full_hql = [prior_hql, output_table_hql].compact.join(";")
+        Hive.run(full_hql, cluster, user)
+        #make sure node user owns the stage result directory
+        output_dir = Hive.table_dir(output_db,output_table,cluster,node_user)
+        Ssh.run("#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} #{output_dir}")
+      else
+        out_string = Hive.run(command, cluster, user)
+        out_string_filename = "000000_0"
+        #create table for result, load result into it
+        output_table_hql = ["drop table if exists #{output_path}",
+                            "create table #{output_path} (result string)",
+                            "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
+        file_hash = {out_string_filename=>out_string}
+        Hive.run(output_table_hql, cluster, node_user, file_hash)
+      end
+      #unslot worker and write result
+      Hive.unslot_worker_by_path(path)
+      out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
+      out_url
+    end
+
+    def Hive.write(cluster, db, table, partitions, source_path, user)
+      s = Stage.where(:path=>stage_path).first
+      u = s.job.runner.user
+      params = s.params
+      user = params['user']
+      cluster = params['cluster'] || Hive.clusters.keys.first
       node = Hadoop.gateway_node(cluster)
       if user and !Ssh.sudoers(node).include?(u.name)
         raise "#{u.name} does not have su permissions for #{node}"
       elsif user.nil? and Ssh.su_all_users(node)
         user = u.name
       end
-      source_path = source_dst.path
-      #slot worker and run
-      Hive.slot_worker_by_cluster_and_path(cluster,path)
-      out_string = Hive.write(cluster, db, table, partitions, source_path, user)
-      #unslot worker and write result
-      Hive.unslot_worker_by_path(path)
-      out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hive/#{stage_path}/out"
-      Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)
-      out_url
-    end
+      #slot Hive worker if available
+      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
+      return false unless slot_id
 
-    def Hive.write(cluster, db, table, partitions, source_path, user)
-      
+      #output table stores stage output
+      #output_table = [Hive.output_db,stage_path.gridsafe].join(".")
+
+      #determine path for target
+      #target_path = params['target']
+      #db, table, partitions = Hive.resolve_path(target_path)
+
       header_row,rows = tsv.split("\n").instance_eval{|a| [a.first,a[1..-1]]}
       #no rows, no write
       return true if header_row.to_s.length == 0 or rows.nil? or rows.length==0
@@ -212,37 +282,6 @@ module Mobilize
       target_path = "#{target_cluster}#{target_cluster_path}"
       in_string = source_dst.read(user)
       out_string = Hive.write(target_path,in_string,user)
-
-      out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hdfs/#{stage_path}/out"
-      Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)
-      out_url
-    end
-
-    def Hive.copy_by_stage_path(stage_path)
-      s = Stage.where(:path=>stage_path).first
-      u = s.job.runner.user
-      params = s.params
-      source_path = params['source']
-      target_path = params['target']
-      user = params['user']
-      #check for source in hdfs format
-      source_cluster, source_cluster_path = Hive.resolve_path(source_path)
-      raise "unable to resolve source path" if source_cluster.nil?
-
-      #determine cluster for target
-      target_cluster, target_cluster_path = Hive.resolve_path(target_path)
-      raise "unable to resolve target path" if target_cluster.nil?
-
-      node = Hadoop.gateway_node(source_cluster)
-      if user and !Ssh.sudoers(node).include?(u.name)
-        raise "#{u.name} does not have su permissions for #{node}"
-      elsif user.nil? and Ssh.su_all_users(node)
-        user = u.name
-      end
-
-      source_path = "#{source_cluster}#{source_cluster_path}"
-      target_path = "#{target_cluster}#{target_cluster_path}"
-      out_string = Hive.copy(source_path,target_path,user)
 
       out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hdfs/#{stage_path}/out"
       Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)

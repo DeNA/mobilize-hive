@@ -3,22 +3,17 @@ development:
   clusters:
     dev_cluster:
       max_slots: 5
-      exec_path: /path/to/hive
-    dev_cluster_2:
+      temp_table_db: mobilize
       exec_path: /path/to/hive
 test:
   clusters:
     test_cluster:
       max_slots: 5
-      exec_path: /path/to/hive
-    test_cluster_2:
-      max_slots: 5
+      temp_table_db: mobilize
       exec_path: /path/to/hive
 production:
   clusters:
     prod_cluster:
       max_slots: 5
-      exec_path: /path/to/hive
-    prod_cluster_2:
-      max_slots: 5
+      temp_table_db: mobilize
       exec_path: /path/to/hive

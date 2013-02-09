@@ -113,18 +113,21 @@ development:
     dev_cluster:
       max_slots: 5
       temp_table_db: mobilize
+      temp_table_directory: /path/to/hdfs/folder
       exec_path: /path/to/hive
 test:
   clusters:
     test_cluster:
       max_slots: 5
       temp_table_db: mobilize
+      temp_table_directory: /path/to/hdfs/folder
       exec_path: /path/to/hive
 production:
   clusters:
     prod_cluster:
       max_slots: 5
       temp_table_db: mobilize
+      temp_table_directory: /path/to/hdfs/folder
       exec_path: /path/to/hive
 ```
 
