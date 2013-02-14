@@ -99,9 +99,9 @@ The Hive configuration consists of:
 * clusters - this defines aliases for clusters, which are used as
 parameters for Hive stages. They should have the same name as those
 in hadoop.yml. Each cluster has:
-  * max_slots - defines the total number of simultaneous slots to be used for hive jobs
-  * temp_table_db - defines the db which should be used to hold temp
-tables used in partition inserts.
+  * max_slots - defines the total number of simultaneous slots to be
+    used for hive jobs on this cluster
+  * output_db - defines the db which should be used to hold stage outputs.
   * exec_path - defines the path to the hive executable
 
 Sample hive.yml:
@@ -112,22 +112,19 @@ development:
   clusters:
     dev_cluster:
       max_slots: 5
-      temp_table_db: mobilize
-      temp_table_directory: /path/to/hdfs/folder
+      output_db: mobilize
       exec_path: /path/to/hive
 test:
   clusters:
     test_cluster:
       max_slots: 5
-      temp_table_db: mobilize
-      temp_table_directory: /path/to/hdfs/folder
+      output_db: mobilize
       exec_path: /path/to/hive
 production:
   clusters:
     prod_cluster:
       max_slots: 5
-      temp_table_db: mobilize
-      temp_table_directory: /path/to/hdfs/folder
+      output_db: mobilize
       exec_path: /path/to/hive
 ```
 
@@ -147,7 +144,7 @@ Start
       end. If the cmd or last query in source is a select statement, column headers will be
       returned as well.
   * hive.write `source:<source_path>, target:<hive_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>`, 
-      which writes the source sheet to the selected hive table.
+      which writes the source to the selected hive table.
     * hive_path 
       * should be of the form `<hive_db>/<table_name>` or `<hive_db>.<table_name>`.  
     * source:

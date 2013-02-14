@@ -41,10 +41,38 @@ module Mobilize
       end
     end
 
-    def Hive.table_dir(db,table,cluster,user)
+    def Hive.table_stats(db,table,cluster,user)
       describe_sql = "use #{db};describe extended #{table}"
       describe_output = Hive.run(describe_sql,cluster,user)
       describe_output.split("location:").last.split(",").first
+      #get location, fields, partitions
+      result_hash = {}
+      result_hash['location'] = describe_output.split("location:").last.split(",").first
+      #get fields
+      field_defs = describe_output.split(" \nDetailed Table Information").first.split(
+                                         "\n").map{|f|
+                                         f.strip.split("\t").ie{|fa|
+                                         {"name"=>fa.first,"datatype"=>fa.second} if fa.first}}.compact
+      #check for partititons
+      if describe_output.index("partitionKeys:[FieldSchema")
+        part_field_string = describe_output.split("partitionKeys:[").last.split("]").first
+        #parse weird schema using yaml plus gsubs
+        yaml_fields = "---" + part_field_string.gsub("FieldSchema","\n").gsub(
+                                                     ")","").gsub(
+                                                     ",","\n ").gsub(
+                                                     "(","- ").gsub(
+                                                     "null","").gsub(
+                                                     ":",": ")
+        #return partitions without the comment part
+        result_hash['partitions'] = YAML.load(yaml_fields).map{|ph| ph.delete('comment');ph}
+        #get rid of fields in fields section that are also partitions
+        result_hash['partitions'].map{|p| p['name']}.each{|n| field_defs.delete_if{|f| f['name']==n}}
+      end
+      #assign field defs after removing partitions
+      result_hash['field_defs'] = field_defs
+      #get size
+      result_hash['size'] = Hadoop.run("fs -dus #{result_hash['location']}",cluster,user).split("\t").last.strip.to_i    
+      return result_hash
     end
 
     def Hive.run(command,cluster,user,file_hash=nil)
@@ -104,7 +132,8 @@ module Mobilize
         Hive.run(full_hql, cluster, user)
         #make sure node user owns the stage result directory
         output_dir = Hive.table_dir(output_db,output_table,cluster,node_user)
-        Ssh.run("#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} #{output_dir}")
+        chown_command = "#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} #{output_dir}"
+        Ssh.run(node,chown_command,node_user)
       else
         out_string = Hive.run(command, cluster, user)
         out_string_filename = "000000_0"
@@ -121,7 +150,30 @@ module Mobilize
       out_url
     end
 
-    def Hive.write(cluster, db, table, partitions, source_path, user)
+    def Hive.schema(schema_path,user,gdrive_slot)
+      if schema_path.index("/")
+        #slashes mean sheets
+        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user)
+      else
+        u = User.where(:name=>user).first
+        #check sheets in runner
+        r = u.runner
+        runner_sheet = r.gbook(gdrive_slot).worksheet_by_title(schema_path)
+        out_tsv = if runner_sheet
+                    runner_sheet.read(user)
+                  else
+                    #check for gfile. will fail if there isn't one.
+                    Gfile.find_by_path(schema_path).read(user)
+                  end
+        #use Gridfs to cache gdrive results
+        file_name = schema_path.split("/").last
+        out_url = "gridfs://#{schema_path}/#{file_name}"
+        Dataset.write_by_url(out_url,out_tsv,user)
+        return Dataset.find_by_url(out_url).read(user)
+      end
+    end
+
+    def Hive.write_by_stage_path(stage_path)
       s = Stage.where(:path=>stage_path).first
       u = s.job.runner.user
       params = s.params
@@ -133,16 +185,77 @@ module Mobilize
       elsif user.nil? and Ssh.su_all_users(node)
         user = u.name
       end
+
+      #output table stores stage output
+      output_path = [Hive.output_db,stage_path.gridsafe].join(".")
+      output_db,output_table = output_table.split(".")
+
+      #determine path for target
+      target_path = params['target']
+      target_db, target_table, partitions = target_path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
+
       #slot Hive worker if available
       slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
       return false unless slot_id
 
-      #output table stores stage output
-      #output_table = [Hive.output_db,stage_path.gridsafe].join(".")
+      gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
+      #return blank response if there are no slots available
+      return nil unless gdrive_slot
+      source_dst = s.source_dsts(gdrive_slot).first
+      user_schema = if params['schema']
+                      #get the schema
+                      Hive.schema(params['schema'],user,gdrive_slot)
+                    else
+                      {}
+                    end
+      Gdrive.unslot_worker_by_path(stage_path)
 
-      #determine path for target
-      #target_path = params['target']
-      #db, table, partitions = Hive.resolve_path(target_path)
+      #determine source
+      if source_dst.handler == 'hive'
+        #source table
+        source_path = source_dst.path
+
+        #get field defs from source table
+        describe_source_hql = "use #{source_db};describe #{source_table}"
+        source_description = Hive.run(describe_source_hql,
+                                     source_cluster,
+                                     source_node_user)
+        source_schema = source_description.split("\n").map{|drow|
+                        drow.split(" ").ie{|dcols|
+                        {dcols.first => dcols.second}}}
+
+        #merge user_schema with source_schema
+        source_schema.each do |k,v|
+          (source_schema[k] = user_schema[k]) if user_schema[k]
+        end
+
+        input_table_hql = if partitions.length==0
+                            ["create table if not exists #{input_path} (#{field_defs.join(",")})",
+                            "insert replace into #{input_path} select * from #{source_path};"].join(";")
+                          else
+                            ["create table if not exists #{input_path} (#{field_defs.join(",")})",
+                            "insert replace into #{input_path} select * from #{source_path};"].join(";")
+
+                          end
+
+      elsif source_dst.handler == 'gridfs'
+        #tsv from sheet
+      elsif source_dst.handler == 'hdfs'
+        #tsv from hdfs
+        header_command = "#{Hadoop.exec_path(cluster)} fs -cat | head 1"
+        Ssh.run(header_command,
+                node,
+                user)
+      else
+        raise "unsupported handler #{source_dst.handler}"
+      end
+
+      output_table_hql = ["drop table if exists #{output_path}",
+                            "create table #{output_path} (#{field_defs.join(",")})",
+                            "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
+
+
+      command = source_dst.read(user)
 
       header_row,rows = tsv.split("\n").instance_eval{|a| [a.first,a[1..-1]]}
       #no rows, no write
@@ -219,81 +332,6 @@ module Mobilize
       else
         return true
       end
-    end
-
-
-
-    def Hive.read_by_stage_path(stage_path)
-      s = Stage.where(:path=>stage_path).first
-      u = s.job.runner.user
-      params = s.params
-      source_path = params['source']
-      user = params['user']
-      #check for source in hdfs format
-      source_cluster, source_cluster_path = Hive.resolve_path(source_path)
-      raise "unable to resolve source path" if source_cluster.nil?
-
-      node = Hadoop.gateway_node(source_cluster)
-      if user and !Ssh.sudoers(node).include?(u.name)
-        raise "#{u.name} does not have su permissions for #{node}"
-      elsif user.nil? and Ssh.su_all_users(node)
-        user = u.name
-      end
-
-      source_path = "#{source_cluster}#{source_cluster_path}"
-      out_string = Hive.read(source_path,user).to_s
-      out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hdfs/#{stage_path}/out"
-      Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)
-      out_url
-    end
-
-    def Hive.write_by_stage_path(stage_path)
-      s = Stage.where(:path=>stage_path).first
-      u = s.job.runner.user
-      params = s.params
-      source_path = params['source']
-      target_path = params['target']
-      user = params['user']
-      #check for source in hdfs format
-      source_cluster, source_cluster_path = Hive.resolve_path(source_path)
-      if source_cluster.nil?
-        #not hdfs
-        gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
-        #return blank response if there are no slots available
-        return nil unless gdrive_slot
-        source_dst = s.source_dsts(gdrive_slot).first
-        Gdrive.unslot_worker_by_path(stage_path)
-      else
-        source_path = "#{source_cluster}#{source_cluster_path}"
-        source_dst = Dataset.find_or_create_by_handler_and_path("hdfs",source_path)
-      end
-
-      #determine cluster for target
-      target_cluster, target_cluster_path = Hive.resolve_path(target_path)
-      raise "unable to resolve target path" if target_cluster.nil?
-
-      node = Hadoop.gateway_node(target_cluster)
-      if user and !Ssh.sudoers(node).include?(u.name)
-        raise "#{u.name} does not have su permissions for #{node}"
-      elsif user.nil? and Ssh.su_all_users(node)
-        user = u.name
-      end
-
-      target_path = "#{target_cluster}#{target_cluster_path}"
-      in_string = source_dst.read(user)
-      out_string = Hive.write(target_path,in_string,user)
-
-      out_url = "hdfs://#{Hadoop.output_cluster}#{Hadoop.output_dir}hdfs/#{stage_path}/out"
-      Dataset.write_by_url(out_url,out_string,Gdrive.owner_name)
-      out_url
-    end
-
-    def Hive.read_by_dataset_path(dst_path,user)
-      Hive.read(dst_path,user)
-    end
-
-    def Hive.write_by_dataset_path(dst_path,string,user)
-      Hive.write(dst_path,string,user)
     end
   end
 end
