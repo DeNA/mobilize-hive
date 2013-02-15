@@ -41,6 +41,7 @@ module Mobilize
       end
     end
 
+    #get field names and partition datatypes and size of a hive table
     def Hive.table_stats(db,table,cluster,user)
       describe_sql = "use #{db};describe extended #{table}"
       describe_output = Hive.run(describe_sql,cluster,user)
@@ -71,10 +72,11 @@ module Mobilize
       #assign field defs after removing partitions
       result_hash['field_defs'] = field_defs
       #get size
-      result_hash['size'] = Hadoop.run("fs -dus #{result_hash['location']}",cluster,user).split("\t").last.strip.to_i    
+      result_hash['size'] = Hadoop.run("fs -dus #{result_hash['location']}",cluster,user).split("\t").last.strip.to_i
       return result_hash
     end
 
+    #run a generic hive command, with the option of passing a file hash to be locally available
     def Hive.run(command,cluster,user,file_hash=nil)
       filename = command.to_md5
       file_hash||= {}
@@ -150,7 +152,7 @@ module Mobilize
       out_url
     end
 
-    def Hive.schema(schema_path,user,gdrive_slot)
+    def Hive.gdrive_schema(schema_path,user,gdrive_slot)
       if schema_path.index("/")
         #slashes mean sheets
         out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user)
@@ -179,7 +181,13 @@ module Mobilize
       params = s.params
       user = params['user']
       cluster = params['cluster'] || Hive.clusters.keys.first
+
+      #slot Hive worker if available
+      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
+      return false unless slot_id
+
       node = Hadoop.gateway_node(cluster)
+      node_user = Ssh.host(node)['user']
       if user and !Ssh.sudoers(node).include?(u.name)
         raise "#{u.name} does not have su permissions for #{node}"
       elsif user.nil? and Ssh.su_all_users(node)
@@ -192,11 +200,16 @@ module Mobilize
 
       #determine path for target
       target_path = params['target']
-      target_db, target_table, partitions = target_path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
+      target_db, target_table, target_partitions = target_path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
 
-      #slot Hive worker if available
-      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
-      return false unless slot_id
+      target_table_path = "#{target_db}.#{target_table}"
+
+      #get target stats if any
+      target_table_stats = begin
+                             Hive.table_stats(target_db,target_table,cluster,node_user)
+                           rescue
+                             nil
+                           end
 
       gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
       #return blank response if there are no slots available
@@ -204,9 +217,11 @@ module Mobilize
       source_dst = s.source_dsts(gdrive_slot).first
       user_schema = if params['schema']
                       #get the schema
-                      Hive.schema(params['schema'],user,gdrive_slot)
+                      Hive.gdrive_schema(params['schema'],
+                                         user,
+                                         gdrive_slot)
                     else
-                      {}
+                      nil
                     end
       Gdrive.unslot_worker_by_path(stage_path)
 
@@ -215,37 +230,54 @@ module Mobilize
         #source table
         source_path = source_dst.path
 
-        #get field defs from source table
-        describe_source_hql = "use #{source_db};describe #{source_table}"
-        source_description = Hive.run(describe_source_hql,
-                                     source_cluster,
-                                     source_node_user)
-        source_schema = source_description.split("\n").map{|drow|
-                        drow.split(" ").ie{|dcols|
-                        {dcols.first => dcols.second}}}
+        #get table stats from source table
+        source_table_stats = Hive.table_stats(source_db, source_table, cluster, node_user)
 
-        #merge user_schema with source_schema
-        source_schema.each do |k,v|
-          (source_schema[k] = user_schema[k]) if user_schema[k]
-        end
+        target_table_hql = if target_partitions.length == 0 and
+                             target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
+                             #no partitions in either user params or the target table
 
-        input_table_hql = if partitions.length==0
-                            ["create table if not exists #{input_path} (#{field_defs.join(",")})",
-                            "insert replace into #{input_path} select * from #{source_path};"].join(";")
-                          else
-                            ["create table if not exists #{input_path} (#{field_defs.join(",")})",
-                            "insert replace into #{input_path} select * from #{source_path};"].join(";")
+                             target_create_hql = "create table if not exists #{target_table_path} (#{field_defs.join(",")})"
 
-                          end
+                             target_insert_hql = "insert overwrite table #{target_table_path} select * from #{source_table_path};"
+
+                             [target_create_hql,target_insert_hql].join(";")
+
+                           elsif target_partitions.length > 0 and
+                             target_table_stats.ie{|tts| tts.nil? || tts['partitions'] == target_partitions}
+                             #partitions and no target table or same partitions in both target table and user params
+
+                             target_set_hql = ["set hive.exec.dynamic.partition.mode=nonstrict",
+                                               "set hive.exec.max.dynamic.partitions.pernode=1000",
+                                               "set hive.exec.dynamic.partition=true",
+                                               "set hive.exec.max.created.files = 200000",
+                                               "set hive.max.created.files = 200000"].join(";")
+
+                             target_create_hql = "create table if not exists #{target_table_path} (#{field_defs.join(",")}) " +
+                                                 "partitioned by (#{partition_defs.join(",")})"
+
+                             target_insert_hql = "insert overwrite table #{target_table_path} " +
+                                                 "partition (#{partition_defs.join(",")}) " +
+                                                 "select * from #{source_table_path};"
+
+                             [target_set_hql, target_create_hql, target_insert_hql].join(";")
+
+                           else
+                             error_msg = "Incompatible partition specs: " +
+                                         "target table:#{target_table_stats['partitions'].to_s}, " +
+                                         "user_params:#{target_partitions.to_s}"
+                             raise error_msg
+                           end
 
       elsif source_dst.handler == 'gridfs'
         #tsv from sheet
-      elsif source_dst.handler == 'hdfs'
-        #tsv from hdfs
-        header_command = "#{Hadoop.exec_path(cluster)} fs -cat | head 1"
-        Ssh.run(header_command,
-                node,
-                user)
+        target_string = source_dst.read(user)
+        target_string_filename = "000000_0"
+        #create table for result, load result into it
+        target_table_hql = ["create table #{target_table_path} (#{field_defs.join(",")})",
+                            "load data local inpath '#{target_string_filename}' overwrite into table #{target_table_path};"].join(";")
+        file_hash = {target_string_filename=>target_string}
+        Hive.run(target_table_hql, cluster, node_user, file_hash)
       else
         raise "unsupported handler #{source_dst.handler}"
       end
@@ -253,7 +285,6 @@ module Mobilize
       output_table_hql = ["drop table if exists #{output_path}",
                             "create table #{output_path} (#{field_defs.join(",")})",
                             "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
-
 
       command = source_dst.read(user)
 
