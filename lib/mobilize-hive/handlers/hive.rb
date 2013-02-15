@@ -194,10 +194,6 @@ module Mobilize
         user = u.name
       end
 
-      #output table stores stage output
-      output_path = [Hive.output_db,stage_path.gridsafe].join(".")
-      output_db,output_table = output_table.split(".")
-
       #determine path for target
       target_path = params['target']
       target_db, target_table, target_partitions = target_path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
@@ -215,14 +211,14 @@ module Mobilize
       #return blank response if there are no slots available
       return nil unless gdrive_slot
       source_dst = s.source_dsts(gdrive_slot).first
-      user_schema = if params['schema']
-                      #get the schema
-                      Hive.gdrive_schema(params['schema'],
-                                         user,
-                                         gdrive_slot)
-                    else
-                      nil
-                    end
+      #user_schema = if params['schema']
+      #                #get the schema
+      #                Hive.gdrive_schema(params['schema'],
+      #                                   user,
+      #                                   gdrive_slot)
+      #              else
+      #                nil
+      #              end
       Gdrive.unslot_worker_by_path(stage_path)
 
       #determine source
@@ -230,10 +226,9 @@ module Mobilize
         #source table
         source_path = source_dst.path
 
-        #get table stats from source table
-        source_table_stats = Hive.table_stats(source_db, source_table, cluster, node_user)
+        source_table_path = source_path.split("/")[0..1].join(".")
 
-        target_table_hql = if target_partitions.length == 0 and
+        target_full_hql =  if target_partitions.length == 0 and
                              target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
                              #no partitions in either user params or the target table
 
@@ -269,99 +264,63 @@ module Mobilize
                              raise error_msg
                            end
 
+        Hive.run(target_full_hql, cluster, user, file_hash)
+
       elsif source_dst.handler == 'gridfs'
         #tsv from sheet
-        target_string = source_dst.read(user)
-        target_string_filename = "000000_0"
-        #create table for result, load result into it
-        target_table_hql = ["create table #{target_table_path} (#{field_defs.join(",")})",
-                            "load data local inpath '#{target_string_filename}' overwrite into table #{target_table_path};"].join(";")
-        file_hash = {target_string_filename=>target_string}
-        Hive.run(target_table_hql, cluster, node_user, file_hash)
-      else
-        raise "unsupported handler #{source_dst.handler}"
-      end
+        source_string = source_dst.read(user)
+        if target_partitions.length == 0 and
+          target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
+          #no partitions in either user params or the target table
 
-      output_table_hql = ["drop table if exists #{output_path}",
-                            "create table #{output_path} (#{field_defs.join(",")})",
-                            "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
+          #one file only
+          source_string_filename = "000000_0"
+          file_hash = {source_string_filename=>source_string}
 
-      command = source_dst.read(user)
+          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs.join(",")})"
 
-      header_row,rows = tsv.split("\n").instance_eval{|a| [a.first,a[1..-1]]}
-      #no rows, no write
-      return true if header_row.to_s.length == 0 or rows.nil? or rows.length==0
-      #make sure header row does not have forbidden terms or characters
-      #and that tsv is encoded in UTF-8
-      sane_header_row, sane_tsv = Hive.sanitize_table(header_row,rows)
+          target_insert_hql = "load data local inpath '#{source_string_filename}' overwrite into table #{target_table_path};"
 
-      #hash array is easier to work with
-      hash_array = sane_tsv.tsv_to_hash_array
+          target_full_hql = [target_create_hql,target_insert_hql].join(";")
 
-      #use tsv to build field definitions
-      field_defs = Hive.field_defs(hash_array)
+          Hive.run(target_full_hql, cluster, user, file_hash)
 
-      #convert all values to discovered datatypes
-      sane_hash_array = Hive.sanitize_hash_array(hash_array, field_defs)
+        elsif target_partitions.length > 0 and
+          target_table_stats.ie{|tts| tts.nil? || tts['partitions'] == target_partitions}
+          #partitions and no target table or same partitions in both target table and user params
 
-      table_statement = if partitions.length == 0
-                          #if there are no partitions, drop the table
-                          #and recreate
-                          data_fields = field_defs.map{|fdef| "#{fdef.first} #{fdef.last}"}
-                          %{drop table if exists #{db}.#{table};} +
-                          %{create table if not exists #{db}.#{table} (#{data_fields.join(",")}) } +
-                          %{row format delimited fields terminated by \"\\t\";}
-                        else
-                          data_fields = []
-                          partition_fields = []
-                          field_defs.each do |fdef|
-                            if partitions.include?(fdef.first)
-                              partition_fields << "#{fdef.first} #{fdef.last}"
-                            else
-                              data_fields << "#{fdef.first} #{fdef.last}"
-                            end
-                          end
-                          %{set hive.exec.dynamic.partition.mode=nonstrict; } +
-                          %{set hive.exec.max.dynamic.partitions.pernode=1000; } +
-                          %{set hive.exec.dynamic.partition=true; } +
-                          %{create table if not exists #{db}.#{table} (#{data_fields.join(",")}) } +
-                          %{partitioned by (#{partition_fields.join(",")}) } +
-                          %{row format delimited fields terminated by \"\\t\";}
-                        end
+          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs.join(",")}) " +
+                              "partitioned by (#{partition_defs.join(",")})"
 
-      #drop, create, load data into temp table
-      temp_data_fields = field_defs.map{|fdef| "#{fdef.first} #{fdef.last}"}
-      temp_table_name = table.to_md5
-      temp_table_statement = %{use #{Hive.temp_table_db};} +
-                             %{drop table if exists #{temp_table_name};} +
-                             %{create table #{temp_table_name} (#{temp_data_fields.join(",")}) } +
-                             %{row format delimited fields terminated by \"\\t\"; } +
-                             %{load data inpath 'input' overwrite into table #{temp_table_name}; }
-
-      insert_statement = if partitions.length == 0
-                           #determine the number of distinct partition columns
-                           #of partition
-                         else
-
-                         end
-
-      full_statement = table_statement + add_data_statement
-      puts full_statement
-      stdout,stderr = Hiver.sh(full_statement,dbuser)
-      stdout = nil
-      #this raises STDERR text if it is prefaced by a FAILED marker
-      if stderr.to_s.downcase.index("failed") or stderr.to_s.downcase.index("killed")
-        if stderr.length>1000
-          if stderr.downcase.index("failed")
-            raise stderr[stderr.downcase.index("failed")-1000..-1]
-          elsif stderr.downcase.index("killed")
-            raise stderr[stderr.downcase.index("killed")-1000..-1]
+          #create target table early if not here-- we need target table stats for partitions
+          unless target_table_stats
+            Hive.run(target_create_hql, cluster, user)
+            target_table_stats = Hive.table_stats(target_db, target_table, cluster, user)
           end
+
+          data_hash.each do |tpmk,tpmv|
+            source_string = tpmv
+            source_string_filename = "#{tpmk}/000000_0"
+            part_stmt = tpmk.split("/").map{|p| p.split("=").ie{|pa| [pa.first,"'#{pa.second}'"]}.join("=")}.join(",")
+            hdfs_dir = "#{target_table_stats['location']}/"
+            hdfs_path = "#{hdfs_dir}#{source_string_filename}"
+            #load partition into appropriate path
+            Hdfs.write(source_string,hdfs_path,user)
+            #let Hive know where the partition is
+            target_add_part_hql = "use #{target_db};alter table #{target_table} add if not exists partition (#{part_stmt}) location '#{hdfs_dir}'"
+            target_insert_part_hql   = "load data inpath '#{hdfs_path}' overwrite into table #{target_table} partition (#{part_stmt});"
+            target_part_hql = [target_add_part_hql,target_insert_part_hql].join(";")
+            Hive.run(target_part_hql, cluster, user)
+          end
+
         else
-          raise stderr
+          error_msg = "Incompatible partition specs: " +
+                      "target table:#{target_table_stats['partitions'].to_s}, " +
+                      "user_params:#{target_partitions.to_s}"
+          raise error_msg
         end
       else
-        return true
+        raise "unsupported handler #{source_dst.handler}"
       end
     end
   end
