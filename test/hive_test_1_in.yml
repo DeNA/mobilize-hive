@@ -1,41 +1,41 @@
 ---
-- date: 2013-01-01
+- act_date: 2013-01-01
   product: product1
   category: category1
   value: 7
-- date: 2013-01-02
+- act_date: 2013-01-02
   product: product2
   category: category1
   value: 3
-- date: 2013-01-03
+- act_date: 2013-01-03
   product: product3
   category: category2
   value: 2
-- date: 2013-02-01
+- act_date: 2013-02-01
   product: product4
   category: category2
   value: 1
-- date: 2013-01-02
+- act_date: 2013-01-02
   product: product5
   category: category3
   value: 6
-- date: 2013-01-05
+- act_date: 2013-01-05
   product: product5
   category: category3
   value: 3
-- date: 2013-01-03
+- act_date: 2013-01-03
   product: product1
   category: category2
   value: 8
-- date: 2013-01-04
+- act_date: 2013-01-04
   product: product5
   category: category2
   value: 7
-- date: 2013-01-09
+- act_date: 2013-01-09
   product: product1
   category: category3
   value: 3
-- date: 2013-01-02
+- act_date: 2013-01-02
   product: product5
   category: category3
   value: 6

@@ -152,7 +152,7 @@ module Mobilize
       out_url
     end
 
-    def Hive.gdrive_schema(schema_path,user,gdrive_slot)
+    def Hive.schema_hash(schema_path,user,gdrive_slot)
       if schema_path.index("/")
         #slashes mean sheets
         out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user)
@@ -171,8 +171,193 @@ module Mobilize
         file_name = schema_path.split("/").last
         out_url = "gridfs://#{schema_path}/#{file_name}"
         Dataset.write_by_url(out_url,out_tsv,user)
-        return Dataset.find_by_url(out_url).read(user)
+        schema_tsv = Dataset.find_by_url(out_url).read(user)
+        schema_hash = {}
+        schema_tsv.tsv_to_hash_array.each do |ha|
+          schema_hash[ha['name']] = ha['datatype']
+        end
+        schema_hash
       end
+    end
+
+    def Hive.path_params(cluster, path, user)
+      db, table, partitions = path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
+      #get existing table stats if any
+      curr_stats = begin
+                     Hive.table_stats(db, table, cluster, user)
+                   rescue
+                     nil
+                   end
+      {"db"=>db,
+       "table"=>table,
+       "partitions"=>partitions,
+       "curr_stats"=>curr_stats}
+    end
+
+    def Hive.hive_to_hive(cluster, source_path, target_path, user)
+
+      source_params = Hive.path_params(cluster, source_path, user)
+      source_table_path = ['db','table'].map{|k| source_params[k]}.join(".")
+      source_table_stats = source_params['curr_stats']
+      source_fields = source_table_stats['fields']
+      source_partitions = source_table_stats['partitions'].to_a
+
+      target_params = Hive.path_params(cluster, target_path, user)
+      target_table_path = ['db','table'].map{|k| source_params[k]}.join(".")
+      target_partitions = target_params['partitions'].to_a
+      target_table_stats = target_params['curr_stats']
+
+      if target_partitions.length == 0 and
+        target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
+        #no partitions in either user params or the target table
+
+        #make sure all fields are added together in this case
+        source_fields += source_partitions
+
+        field_defs = (target_fields || source_fields).ie do |fs|
+                       "(#{fs.map{|f| "`#{f['name']}` #{f['datatype']}"}.join(",")})"
+                     end
+
+        target_create_hql = "create table if not exists #{target_table_path} (#{field_defs})"
+
+        target_insert_hql = "insert overwrite table #{target_table_path} select * from #{source_table_path};"
+
+        target_full_hql = [target_create_hql,target_insert_hql].join(";")
+
+        Hive.run(target_full_hql, cluster, user, file_hash)
+
+      elsif target_partitions.length > 0 and
+        target_table_stats.ie{|tts| tts.nil? || tts['partitions'] == target_partitions}
+        #partitions and no target table or same partitions in both target table and user params
+
+        field_defs = "(#{target_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
+        partition_defs = "(#{partition_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
+
+        target_set_hql = ["set hive.exec.dynamic.partition.mode=nonstrict",
+                          "set hive.exec.max.dynamic.partitions.pernode=1000",
+                          "set hive.exec.dynamic.partition=true",
+                          "set hive.exec.max.created.files = 200000",
+                          "set hive.max.created.files = 200000"].join(";")
+
+        target_create_hql = "create table if not exists #{target_table_path} (#{field_defs}) " +
+                            "partitioned by (#{partition_defs})"
+
+        target_insert_hql = "insert overwrite table #{target_table_path} " +
+                            "partition (#{partition_defs}) " +
+                            "select * from #{source_table_path};"
+
+        target_full_hql = [target_set_hql, target_create_hql, target_insert_hql].join(";")
+
+      else
+        error_msg = "Incompatible partition specs"
+        raise error_msg
+      end
+      Hive.run(target_full_hql, cluster, user, file_hash)
+      return target_path
+    end
+
+    def Hive.tsv_to_hive(cluster, source_tsv, target_path, user,drop_target=false,schema_hash=nil)
+      source_headers = source_tsv.tsv_header_array
+
+      target_params = Hive.path_params(cluster, target_path, user)
+      target_db,target_table = ['db','table'].map{|k| target_params[k]}
+      target_table_path = [target_db,target_table].join(".")
+      target_partitions = target_params['partitions'].to_a
+      target_table_stats = target_params['curr_stats']
+
+      schema_hash ||= {}
+
+      if target_partitions.length == 0 and
+        target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
+        #no partitions in either user params or the target table
+
+        #one file only, strip headers, replace tab with ctrl-a for hive
+        source_rows = source_tsv.split("\n")[1..-1].join("\n").gsub("\t","\001")
+        source_tsv_filename = "000000_0"
+        file_hash = {source_tsv_filename=>source_rows}
+
+        field_defs = source_headers.map do |name| 
+          datatype = schema_hash[name] || "string"
+          "`#{name}` #{datatype}"
+        end.ie{|fs| "(#{fs.join(",")})"}
+
+        #for single insert, use drop table and create table always
+        target_drop_hql = "drop table if exists #{target_table_path}"
+
+        target_create_hql = "create table #{target_table_path} #{field_defs}"
+
+        #load source data
+        target_insert_hql = "load data local inpath '#{source_tsv_filename}' overwrite into table #{target_table_path};"
+
+        target_full_hql = [target_drop_hql,target_create_hql,target_insert_hql].join(";")
+
+        Hive.run(target_full_hql, cluster, user, file_hash)
+
+      elsif target_partitions.length > 0 and
+        target_table_stats.ie{|tts| tts.nil? || tts['partitions'].to_a.map{|p| p['name']} == target_partitions}
+        #partitions and no target table or same partitions in both target table and user params
+
+        target_headers = source_headers.reject{|h| target_partitions.include?(h)}
+
+        field_defs = "(#{target_headers.map do |name|
+                       datatype = schema_hash[name] || "string"
+                       "`#{name}` #{datatype}"
+                     end.join(",")})"
+
+        partition_defs = "(#{target_partitions.map do |name|
+                           datatype = schema_hash[name] || "string"
+                           "#{name} #{datatype}"
+                         end.join(",")})"
+
+        target_drop_hql = drop_target ? "drop table if exists #{target_table_path};" : ""
+
+        target_create_hql = target_drop_hql +
+                            "create table if not exists #{target_table_path} #{field_defs} " +
+                            "partitioned by #{partition_defs}"
+
+        #create target table early if not here-- we need target table stats for partitions
+        unless target_table_stats
+          Hive.run(target_create_hql, cluster, user)
+          target_table_stats = Hive.table_stats(target_db, target_table, cluster, user)
+        end
+
+        #create data hash from source hash array
+        data_hash = {}
+        source_hash_array = source_tsv.tsv_to_hash_array
+        source_hash_array.each do |ha|
+          tpmk = target_partitions.map{|pn| "#{pn}=#{ha[pn]}"}.join("/")
+          tpmv = ha.reject{|k,v| target_partitions.include?(k)}.values.join("\001")
+          if data_hash[tpmk]
+            data_hash[tpmk] += "\n#{tpmv}"
+          else
+            data_hash[tpmk] = tpmv
+          end
+        end
+
+        #go through completed data hash and write each key value to the table in question
+        data_hash.each do |tpmk,tpmv|
+          base_filename = "000000_0"
+          part_pairs = tpmk.split("/").map{|p| p.split("=").ie{|pa| ["#{pa.first}","#{pa.second}"]}}
+          part_dir = part_pairs.map{|pp| "#{pp.first}=#{pp.second}"}.join("/")
+          part_stmt = part_pairs.map{|pp| "#{pp.first}='#{pp.second}'"}.join("/")
+          hdfs_dir = "#{target_table_stats['location']}/#{part_dir}"
+          hdfs_source_path = "/#{hdfs_dir.split("/")[3..-2].join("/")}/#{base_filename}"
+          hdfs_target_path = "/#{hdfs_dir.split("/")[3..-1].join("/")}/#{base_filename}"
+          #load partition into source path
+          Hdfs.write(hdfs_source_path,tpmv,user)
+          #let Hive know where the partition is
+          target_add_part_hql = "use #{target_db};alter table #{target_table} add if not exists partition (#{part_stmt}) location '#{hdfs_target_path}'"
+          target_insert_part_hql   = "load data inpath '#{hdfs_source_path}' overwrite into table #{target_table} partition (#{part_stmt});"
+          target_part_hql = [target_add_part_hql,target_insert_part_hql].join(";")
+          Hive.run(target_part_hql, cluster, user)
+        end
+      else
+        error_msg = "Incompatible partition specs: " +
+                    "target table:#{target_table_stats['partitions'].to_s}, " +
+                    "user_params:#{target_partitions.to_s}"
+        raise error_msg
+      end
+      return target_path
     end
 
     def Hive.write_by_stage_path(stage_path)
@@ -196,169 +381,33 @@ module Mobilize
 
       #determine path for target
       target_path = params['target']
-      target_db, target_table, target_partitions = target_path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
-
-      target_table_path = "#{target_db}.#{target_table}"
-
-      target_table_stats, target_partitions, target_fields = [nil] * 3
-
-      #get target stats if any
-      begin
-        target_table_stats = Hive.table_stats(target_db,target_table,cluster,user)
-        target_partitions  = target_table_stats['partitions']
-        target_fields      = target_table_stats['fields']
-      rescue
-      end
 
       gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
       #return blank response if there are no slots available
       return nil unless gdrive_slot
       source_dst = s.source_dsts(gdrive_slot).first
+      schema_hash = params['schema'] ? Hive.schema_hash(params['schema'],user,gdrive_slot) : {}
       Gdrive.unslot_worker_by_path(stage_path)
+
+      drop_target_flag = params['drop']
 
       #determine source
       if source_dst.handler == 'hive'
         #source table
         source_path = source_dst.path
-        source_table_path = source_path.split("/")[0..1].join(".")
-
-        source_table_stats = Hive.table_stats(source_db,source_table,cluster,user)
-        source_fields = source_table_stats['fields']
-        source_partitions = source_table_stats['partitions'].to_a
-
-        if target_partitions.length == 0 and
-          target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
-          #no partitions in either user params or the target table
-
-          #make sure all fields are added together in this case
-          source_fields += source_partitions
-
-          field_defs = (target_fields || source_fields).ie do |fs|
-                         "(#{fs.map{|f| "`#{f['name']}` #{f['datatype']}"}.join(",")})"
-                       end
-
-          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs})"
-
-          target_insert_hql = "insert overwrite table #{target_table_path} select * from #{source_table_path};"
-
-          target_full_hql = [target_create_hql,target_insert_hql].join(";")
-
-          Hive.run(target_full_hql, cluster, user, file_hash)
-
-        elsif target_partitions.length > 0 and
-          target_table_stats.ie{|tts| tts.nil? || tts['partitions'] == target_partitions}
-          #partitions and no target table or same partitions in both target table and user params
-
-          field_defs = "(#{target_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
-          partition_defs = "(#{partition_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
-
-          target_set_hql = ["set hive.exec.dynamic.partition.mode=nonstrict",
-                            "set hive.exec.max.dynamic.partitions.pernode=1000",
-                            "set hive.exec.dynamic.partition=true",
-                            "set hive.exec.max.created.files = 200000",
-                            "set hive.max.created.files = 200000"].join(";")
-
-          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs}) " +
-                              "partitioned by (#{partition_defs})"
-
-          target_insert_hql = "insert overwrite table #{target_table_path} " +
-                              "partition (#{partition_defs}) " +
-                              "select * from #{source_table_path};"
-
-          target_full_hql = [target_set_hql, target_create_hql, target_insert_hql].join(";")
-
-        else
-          error_msg = "Incompatible partition specs"
-          raise error_msg
-        end
-
-        Hive.run(target_full_hql, cluster, user, file_hash)
-
+        out_string = Hive.hive_to_hive(cluster, source_path, target_path, user, drop_target_flag, schema_hash)
       elsif source_dst.handler == 'gridfs'
         #tsv from sheet
-        source_string = source_dst.read(user)
-        source_hash_array = source_string.tsv_to_hash_array
-        source_headers = source_hash_array.first.keys
-
-        if target_partitions.length == 0 and
-          target_table_stats.ie{|tts| tts.nil? || tts['partitions'].nil?}
-          #no partitions in either user params or the target table
-
-          #one file only
-          source_string_filename = "000000_0"
-          file_hash = {source_string_filename=>source_string}
-
-          #all fields are strings
-          field_defs = source_headers.map{|h| "`#{h}` string"}.ie{|fs| "(#{fs.join(",")})"}
-
-          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs})"
-
-          target_insert_hql = "load data local inpath '#{source_string_filename}' overwrite into table #{target_table_path};"
-
-          target_full_hql = [target_create_hql,target_insert_hql].join(";")
-
-          Hive.run(target_full_hql, cluster, user, file_hash)
-
-        elsif target_partitions.length > 0 and
-          target_table_stats.ie{|tts| tts.nil? || tts['partitions'] == target_partitions}
-          #partitions and no target table or same partitions in both target table and user params
-
-          field_defs = "(#{target_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
-          partition_defs = "(#{partition_fields.map{|tf| "`#{tf['name']}` #{tf['datatype']}"}.join(",")})"
-
-          target_create_hql = "create table if not exists #{target_table_path} (#{field_defs.join(",")}) " +
-                              "partitioned by (#{partition_defs.join(",")})"
-
-          #create target table early if not here-- we need target table stats for partitions
-          unless target_table_stats
-            Hive.run(target_create_hql, cluster, user)
-            target_table_stats = Hive.table_stats(target_db, target_table, cluster, user)
-          end
-
-          #create data hash from source hash array
-          data_hash = {}
-          source_hash_array.each do |ha|
-            partition_names = partition_fields.map{|pf| pf['name']}
-            tpmk = partition_names.map{|pn| "#{pn}=#{ha[pn]}"}.join("/")
-            tpmv = ha.reject{|k,v| partition_names.include?(k)}.join("\001")
-            if data_hash[tpmk]
-              data_hash[tpmk] += "\n##{tpmv}"
-            else
-              data_hash[tpmk] = tpmv
-            end
-          end
-
-          #go through completed data hash and write each key value to the table in question
-          data_hash.each do |tpmk,tpmv|
-            source_string = tpmv
-            source_string_filename = "#{tpmk}/000000_0"
-            part_stmt = tpmk.split("/").map{|p| p.split("=").ie{|pa| [pa.first,"'#{pa.second}'"]}.join("=")}.join(",")
-            hdfs_dir = "#{target_table_stats['location']}/"
-            hdfs_path = "#{hdfs_dir}#{source_string_filename}"
-            #load partition into appropriate path
-            Hdfs.write(source_string,hdfs_path,user)
-            #let Hive know where the partition is
-            target_add_part_hql = "use #{target_db};alter table #{target_table} add if not exists partition (#{part_stmt}) location '#{hdfs_dir}'"
-            target_insert_part_hql   = "load data inpath '#{hdfs_path}' overwrite into table #{target_table} partition (#{part_stmt});"
-            target_part_hql = [target_add_part_hql,target_insert_part_hql].join(";")
-            Hive.run(target_part_hql, cluster, user)
-          end
-
-        else
-          error_msg = "Incompatible partition specs: " +
-                      "target table:#{target_table_stats['partitions'].to_s}, " +
-                      "user_params:#{target_partitions.to_s}"
-          raise error_msg
-        end
+        source_tsv = source_dst.read(user)
+        out_string = Hive.tsv_to_hive(cluster, source_tsv, target_path, user, drop_target_flag, schema_hash)
       else
-        raise "unsupported handler #{source_dst.handler}"
+        raise "unsupported source handler #{source_dst.handler}"
       end
 
       #output table stores stage output
       output_path = [Hive.output_db,stage_path.gridsafe].join(".")
       output_db,output_table = output_table.split(".")
 
-      out_string = "true"
       out_string_filename = "000000_0"
       #create table for result, load result into it
       output_table_hql = ["drop table if exists #{output_path}",
