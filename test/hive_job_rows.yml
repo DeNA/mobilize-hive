@@ -3,10 +3,10 @@
   active: true
   trigger: once
   status: ""
-  stage1: hive.write target:"mobilize/hive_test_1/act_date/product", drop:true,
+  stage1: hive.write target:"mobilize/hive_test_1/act_date", drop:true,
             source:"Runner_mobilize(test)/hive_test_1.in", schema:"hive_test_1.schema"
   stage2: hive.run source:"hive_test_1.hql"
-  stage3: hive.run hql:"show databases"
+  stage3: hive.run hql:"show databases;"
   stage4: gsheet.write source:"stage2", target:"hive_test_1_stage_2.out"
   stage5: gsheet.write source:"stage3", target:"hive_test_1_stage_3.out"
 - name: hive_test_2
@@ -14,11 +14,12 @@
   trigger: after hive_test_1
   status: ""
   stage1: hive.write source:"hdfs://user/mobilize/test/test_hdfs_1.out", target:"mobilize.hive_test_2", drop:true
-  stage2: hive.run hql:"select * from mobilize.hive_test_2"
+  stage2: hive.run hql:"select * from mobilize.hive_test_2;"
   stage3: gsheet.write source:"stage2", target:"hive_test_2.out"
 - name: hive_test_3
   active: true
-  trigger: after_hive_test_2
+  trigger: after hive_test_2
   status: ""
-  stage1: hive.write source:"mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/act_date/product", drop:true
-  stage2: gsheet.write source:"stage1", target:"hive_test_3.out"
+  stage2: hive.run hql:"select act_date as `date`,product,category,value from mobilize.hive_test_1;"
+  stage3: hive.write source:"stage2",target:"mobilize/hive_test_3/date/product", drop:false
+  stage4: gsheet.write source:"hive://mobilize.hive_test_3", target:"hive_test_3.out"

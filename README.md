@@ -139,25 +139,31 @@ Start
   * cluster and user are optional for all of the below.
     * cluster defaults to the first cluster listed;
     * user is treated the same way as in [mobilize-ssh][mobilize-ssh].
-  * hive.run `cmd:<hql> || source:<gsheet_path>, user:<user>, cluster:<cluster>`, which executes the
-      script in the cmd or source sheet and returns any output specified at the
+  * hive.run `hql:<hql> || source:<gsheet_path>, user:<user>, cluster:<cluster>`, which executes the
+      script in the hql or source sheet and returns any output specified at the
       end. If the cmd or last query in source is a select statement, column headers will be
       returned as well.
-  * hive.write `source:<source_path>, target:<hive_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>`, 
-      which writes the source to the selected hive table.
+  * hive.write `hql:<hql> || source:<source_path>, target:<hive_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>, drop:<true/false>`, 
+      which writes the source or query result to the selected hive table.
     * hive_path 
       * should be of the form `<hive_db>/<table_name>` or `<hive_db>.<table_name>`.  
     * source:
       * can be a gsheet_path, hdfs_path, or hive_path (no partitions)
-      * for gsheet and hdfs path, first row is used for column headers
+      * for gsheet and hdfs path, 
+        * if the file ends in .*ql, it's treated the same as passing hql
+        * otherwise it is treated as a tsv with the first row as column headers
     * target:
       * Partitions can optionally be added to the hive_path, as in `<hive_db>/<table_name>/<partition1>/<partition2>`. 
+      * Due to Hive limitation, partition names CANNOT be reserved keywords when writing from tsv (gsheet or hdfs source)
     * schema:
       * optional. gsheet_path to column schema. 
         * two columns: name, datatype
         * Any columns not defined here will receive "string" as the datatype
-        * partitions are considered columns for this purpose
-        * columns named here that are not in the dataset will be ignored 
+        * partitions can have their datatypes overridden here as well
+        * columns named here that are not in the dataset will be ignored
+    * drop:
+      * optional. drops the target table before performing write
+      * defaults to false
 
 <a name='section_Start_Run_Test'></a>
 ### Run Test
@@ -182,7 +188,7 @@ hadoop.yml.
 
 * The test runs these jobs:
   * hive_test_1:
-    * `hive.write target:"mobilize/hive_test_1/date/product",source:"Runner_mobilize(test)/hive_test_1.in", schema:"hive_test_1.schema`
+    * `hive.write target:"mobilize/hive_test_1/act_date",source:"Runner_mobilize(test)/hive_test_1.in", schema:"hive_test_1.schema", drop:true`
     * `hive.run source:"hive_test_1.hql"`
     * `hive.run cmd:"show databases"`
     * `gsheet.write source:"stage2", target:"hive_test_1_stage_2.out"`
@@ -193,14 +199,15 @@ hadoop.yml.
         sum of the data as in your write query, one with the results of the show
         databases command.
   * hive_test_2:
-    * `hive.write source:"hdfs://user/mobilize/test/test_hdfs_1.out", target:"mobilize.hive_test_2"`
+    * `hive.write source:"hdfs://user/mobilize/test/test_hdfs_1.out", target:"mobilize.hive_test_2", drop:true`
     * `hive.run cmd:"select * from mobilize.hive_test_2"`
     * `gsheet.write source:"stage2", target:"hive_test_2.out"`
-    * this test uses the output from the first hdfs test as an input, so
-make sure you've run that first.
+    * this test uses the output from the first hdfs test as an input, so make sure you've run that first.
   * hive_test_3:
-    * `hive.write source:"hive://mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/date/product"`
-    * `gsheet.write source:"hive://mobilize.hive_test_1_copy", target:"hive_test_3.out"`
+    * `hive.write source:"hive://mobilize.hive_test_1",target:"mobilize/hive_test_3/date/product",drop:true`
+    * `hive.run hql:"select act_date as ```date```,product,category,value from mobilize.hive_test_1;"`
+    * `hive.write source:"stage2",target:"mobilize/hive_test_3/date/product", drop:false`
+    * `gsheet.write source:"hive://mobilize.hive_test_3", target:"hive_test_3.out"`
 
 
 <a name='section_Meta'></a>

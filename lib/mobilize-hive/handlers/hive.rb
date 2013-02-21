@@ -199,7 +199,7 @@ module Mobilize
        "curr_stats"=>curr_stats}
     end
 
-    def Hive.hql_to_table(cluster, source_cmd, target_path, user, drop=false, schema_hash=nil)
+    def Hive.hql_to_table(cluster, source_hql, target_path, user, drop=false, schema_hash=nil)
       target_params = Hive.path_params(cluster, target_path, user)
       target_table_path = ['db','table'].map{|k| target_params[k]}.join(".")
       target_partitions = target_params['partitions'].to_a
@@ -207,10 +207,10 @@ module Mobilize
 
       #create temporary table so we can identify fields etc.
       temp_db = Hive.output_db(cluster)
-      temp_table_name = (source_cmd+target_path).to_md5
+      temp_table_name = (source_hql+target_path).to_md5
       temp_table_path = [temp_db,temp_table_name].join(".")
       temp_drop_hql = "drop table if exists #{temp_table_path};"
-      temp_create_hql = "#{temp_drop_hql}create table #{temp_table_path} as #{source_cmd}"
+      temp_create_hql = "#{temp_drop_hql}create table #{temp_table_path} as #{source_hql}"
       Hive.run(temp_create_hql,cluster,user)
 
       source_params = Hive.path_params(cluster, temp_table_path, user)
@@ -463,17 +463,29 @@ module Mobilize
       drop = params['drop']
 
       #determine source
+      source_tsv,source_hql = [nil]*2
       if source_dst.handler == 'hive'
         #source table
-        source_hql = source_dst.path
-        out_string = Hive.hql_to_table(cluster, source_hql, target_path, user, drop, schema_hash)
+        source_hql = "select * from #{source_dst.path};"
       elsif ['gridfs','hdfs'].include?(source_dst.handler)
-        #tsv from sheet
-        source_tsv = source_dst.read(user)
-        out_string = Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop, schema_hash)
-      else
-        raise "unsupported source handler #{source_dst.handler}"
+        if source_dst.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
+          source_hql = source_dst.read(user)
+        else
+          #tsv from sheet
+          source_tsv = source_dst.read(user)
+        end
       end
+
+      out_string = if source_hql
+                     Hive.hql_to_table(cluster, source_hql, target_path, user, drop, schema_hash)
+                   elsif source_tsv
+                     Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop, schema_hash)
+                   else
+                     raise "Unable to determine source tsv or source hql"
+                   end
+
+
+
       #unslot worker and write result
       Hive.unslot_worker_by_path(stage_path)
 
