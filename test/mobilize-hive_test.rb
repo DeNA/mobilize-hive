@@ -31,9 +31,16 @@ describe "Mobilize" do
     hive_1_schema_tsv = YAML.load_file("#{Mobilize::Base.root}/test/hive_test_1_schema.yml").hash_array_to_tsv
     hive_1_schema_sheet.write(hive_1_schema_tsv,Mobilize::Gdrive.owner_name)
 
+    hive_1_hql_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1.hql",gdrive_slot)
+    [hive_1_hql_sheet].each {|s| s.delete if s}
+    hive_1_hql_sheet = Mobilize::Gsheet.find_or_create_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1.hql",gdrive_slot)
+    hive_1_hql_tsv = File.open("#{Mobilize::Base.root}/test/hive_test_1.hql").read
+    hive_1_hql_sheet.write(hive_1_hql_tsv,Mobilize::Gdrive.owner_name)
+
     jobs_sheet = r.gsheet(gdrive_slot)
 
     test_job_rows = ::YAML.load_file("#{Mobilize::Base.root}/test/hive_job_rows.yml")
+    test_job_rows.map{|j| r.jobs(j['name'])}.each{|j| j.delete if j}
     jobs_sheet.add_or_update_rows(test_job_rows)
 
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)
@@ -45,9 +52,9 @@ describe "Mobilize" do
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
     [hive_3_target_sheet].each{|s| s.delete if s}
 
-    puts "job row added, force enqueued requestor, wait 150s"
+    puts "job row added, force enqueued requestor, wait 600s"
     r.enqueue!
-    sleep 180
+    sleep 600
 
     puts "jobtracker posted data to test sheet"
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)

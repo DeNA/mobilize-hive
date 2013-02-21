@@ -83,14 +83,14 @@ module Mobilize
     end
 
     #run a generic hive command, with the option of passing a file hash to be locally available
-    def Hive.run(command,cluster,user,file_hash=nil)
-      filename = command.to_md5
+    def Hive.run(hql,cluster,user,file_hash=nil)
+      filename = hql.to_md5
       file_hash||= {}
-      file_hash[filename] = command
+      file_hash[filename] = hql
       #silent mode so we don't have logs in stderr
-      exec_command = "#{Hive.exec_path(cluster)} -S -f #{filename}"
+      command = "#{Hive.exec_path(cluster)} -S -f #{filename}"
       gateway_node = Hadoop.gateway_node(cluster)
-      Ssh.run(gateway_node,exec_command,user,file_hash)
+      Ssh.run(gateway_node,command,user,file_hash)
     end
 
     def Hive.run_by_stage_path(stage_path)
@@ -112,12 +112,12 @@ module Mobilize
       return false unless slot_id
 
       #output table stores stage output
-      output_path = [Hive.output_db,stage_path.gridsafe].join(".")
-      output_db,output_table = output_table.split(".")
+      output_path = [Hive.output_db(cluster),stage_path.gridsafe].join(".")
+      output_db,output_table = output_path.split(".")
 
       #get hql
-      if params['cmd']
-        command = params['cmd']
+      if params['hql']
+        hql = params['hql']
       else
         #user has passed in a gsheet hql
         gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
@@ -125,25 +125,26 @@ module Mobilize
         return nil unless gdrive_slot
         source_dst = s.source_dsts(gdrive_slot).first
         Gdrive.unslot_worker_by_path(stage_path)
-        command = source_dst.read(user)
+        hql = source_dst.read(user)
       end
 
       #check for select at end
-      command_array = command.split(";").map{|cc| cc.strip}.reject{|cc| cc.length==0}
-      if command_array.last.downcase.starts_with?("select")
+      hql_array = hql.split(";").map{|hc| hc.strip}.reject{|hc| hc.length==0}
+      if hql_array.last.downcase.starts_with?("select")
         #nil if no prior commands
-        prior_hql = command_array[0..-2].join(";") if command_array.length > 1
-        select_hql = command_array.last
+        prior_hql = hql_array[0..-2].join(";") if hql_array.length > 1
+        select_hql = hql_array.last
         output_table_hql = ["drop table if exists #{output_path}",
                             "create table #{output_path} as #{select_hql};"].join(";")
         full_hql = [prior_hql, output_table_hql].compact.join(";")
         Hive.run(full_hql, cluster, user)
         #make sure node user owns the stage result directory
-        output_dir = Hive.table_dir(output_db,output_table,cluster,node_user)
-        chown_command = "#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} #{output_dir}"
+        output_table_stats = Hive.table_stats(output_db,output_table,cluster,node_user)
+        output_table_location = output_table_stats['location']
+        chown_command = "#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} '#{output_table_location}'"
         Ssh.run(node,chown_command,node_user)
       else
-        out_string = Hive.run(command, cluster, user)
+        out_string = Hive.run(hql, cluster, user)
         out_string_filename = "000000_0"
         #create table for result, load result into it
         output_table_hql = ["drop table if exists #{output_path}",
@@ -152,9 +153,10 @@ module Mobilize
         file_hash = {out_string_filename=>out_string}
         Hive.run(output_table_hql, cluster, node_user, file_hash)
       end
-      #unslot worker and write result
-      Hive.unslot_worker_by_path(path)
+      #unslot worker and create result query
+      Hive.unslot_worker_by_path(stage_path)
       out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
+      Dataset.find_or_create_by_url(out_url)
       out_url
     end
 
@@ -200,8 +202,7 @@ module Mobilize
        "curr_stats"=>curr_stats}
     end
 
-    def Hive.hive_to_hive(cluster, source_cmd, target_path, user, drop=false, schema_hash=nil)
-
+    def Hive.hql_to_table(cluster, source_cmd, target_path, user, drop=false, schema_hash=nil)
       target_params = Hive.path_params(cluster, target_path, user)
       target_table_path = ['db','table'].map{|k| target_params[k]}.join(".")
       target_partitions = target_params['partitions'].to_a
@@ -324,7 +325,7 @@ module Mobilize
     #turn a tsv into a hive table.
     #Accepts options to drop existing target if any
     #also schema with column datatype overrides
-    def Hive.tsv_to_hive(cluster, source_tsv, target_path, user, drop=false, schema_hash=nil)
+    def Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop=false, schema_hash=nil)
       source_headers = source_tsv.tsv_header_array
 
       target_params = Hive.path_params(cluster, target_path, user)
@@ -414,14 +415,14 @@ module Mobilize
           hdfs_source_path = "/#{hdfs_dir.split("/")[3..-2].join("/")}/#{base_filename}"
           hdfs_target_path = "/#{hdfs_dir.split("/")[3..-1].join("/")}/#{base_filename}"
           #load partition into source path
+          puts "Writing to #{hdfs_source_path} for #{user} at #{Time.now.utc}"
           Hdfs.write(hdfs_source_path,tpmv,user)
-          puts "Wrote to #{hdfs_source_path} for #{user} at #{Time.now.utc}"
           #let Hive know where the partition is
           target_add_part_hql = "use #{target_db};alter table #{target_table} add if not exists partition (#{part_stmt}) location '#{hdfs_target_path}'"
           target_insert_part_hql   = "load data inpath '#{hdfs_source_path}' overwrite into table #{target_table} partition (#{part_stmt});"
           target_part_hql = [target_add_part_hql,target_insert_part_hql].join(";")
+          puts "Adding partition #{tpmk} to #{target_table_path} for #{user} at #{Time.now.utc}"
           Hive.run(target_part_hql, cluster, user)
-          puts "Added partition #{tpmk} to #{target_table_path} for #{user} at #{Time.now.utc}"
         end
       else
         error_msg = "Incompatible partition specs: " +
@@ -467,31 +468,37 @@ module Mobilize
       #determine source
       if source_dst.handler == 'hive'
         #source table
-        source_path = source_dst.path
-        out_string = Hive.hive_to_hive(cluster, source_path, target_path, user, drop, schema_hash)
+        source_hql = source_dst.path
+        out_string = Hive.hql_to_table(cluster, source_hql, target_path, user, drop, schema_hash)
       elsif source_dst.handler == 'gridfs'
         #tsv from sheet
         source_tsv = source_dst.read(user)
-        out_string = Hive.tsv_to_hive(cluster, source_tsv, target_path, user, drop, schema_hash)
+        out_string = Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop, schema_hash)
       else
         raise "unsupported source handler #{source_dst.handler}"
       end
+      #unslot worker and write result
+      Hive.unslot_worker_by_path(stage_path)
 
       #output table stores stage output
-      output_path = [Hive.output_db,stage_path.gridsafe].join(".")
-      output_db,output_table = output_table.split(".")
-
-      out_string_filename = "000000_0"
-      #create table for result, load result into it
-      output_table_hql = ["drop table if exists #{output_path}",
-                          "create table #{output_path} (result string)",
-                          "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
-      file_hash = {out_string_filename=>out_string}
-      Hive.run(output_table_hql, cluster, node_user, file_hash)
-      #unslot worker and write result
-      Hive.unslot_worker_by_path(path)
+      output_db,output_table = [Hive.output_db(cluster),stage_path.gridsafe]
       out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
+      Dataset.write_by_url(out_url,out_string,node_user)
       out_url
     end
+
+    def Hive.read_by_dataset_path(dst_path,user)
+      cluster,source_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
+      hql = "select * from #{source_path}"
+      Hive.run(hql,cluster,user)
+    end
+
+    def Hive.write_by_dataset_path(dst_path,string,user)
+      cluster,target_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
+      source_tsv = "result\n#{string}"
+      drop = true
+      Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop)
+    end
   end
+
 end
