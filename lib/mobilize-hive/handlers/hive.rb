@@ -461,17 +461,18 @@ module Mobilize
       schema_hash = params['schema'] ? Hive.schema_hash(params['schema'],user,gdrive_slot) : {}
       Gdrive.unslot_worker_by_path(stage_path)
 
-      drop_target_flag = params['drop']
+      #drop target before create/insert?
+      drop = params['drop']
 
       #determine source
       if source_dst.handler == 'hive'
         #source table
         source_path = source_dst.path
-        out_string = Hive.hive_to_hive(cluster, source_path, target_path, user, drop_target_flag, schema_hash)
+        out_string = Hive.hive_to_hive(cluster, source_path, target_path, user, drop, schema_hash)
       elsif source_dst.handler == 'gridfs'
         #tsv from sheet
         source_tsv = source_dst.read(user)
-        out_string = Hive.tsv_to_hive(cluster, source_tsv, target_path, user, drop_target_flag, schema_hash)
+        out_string = Hive.tsv_to_hive(cluster, source_tsv, target_path, user, drop, schema_hash)
       else
         raise "unsupported source handler #{source_dst.handler}"
       end
