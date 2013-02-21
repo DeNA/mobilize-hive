@@ -87,8 +87,9 @@ module Mobilize
       filename = hql.to_md5
       file_hash||= {}
       file_hash[filename] = hql
-      #silent mode so we don't have logs in stderr
-      command = "#{Hive.exec_path(cluster)} -S -f #{filename}"
+      #silent mode so we don't have logs in stderr; clip output
+      #at hadoop read limit
+      command = "#{Hive.exec_path(cluster)} -S -f #{filename} | head -c #{Hadoop.read_limit}"
       gateway_node = Hadoop.gateway_node(cluster)
       Ssh.run(gateway_node,command,user,file_hash)
     end
@@ -112,8 +113,9 @@ module Mobilize
       return false unless slot_id
 
       #output table stores stage output
-      output_path = [Hive.output_db(cluster),stage_path.gridsafe].join(".")
-      output_db,output_table = output_path.split(".")
+      output_db,output_table = [Hive.output_db(cluster),stage_path.gridsafe]
+      output_path = [output_db,output_table].join(".")
+      out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
 
       #get hql
       if params['hql']
@@ -143,20 +145,15 @@ module Mobilize
         output_table_location = output_table_stats['location']
         chown_command = "#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} '#{output_table_location}'"
         Ssh.run(node,chown_command,node_user)
+        #already populated, make sure dataset exists
+        Dataset.find_or_create_by_url(out_url)
       else
         out_string = Hive.run(hql, cluster, user)
-        out_string_filename = "000000_0"
-        #create table for result, load result into it
-        output_table_hql = ["drop table if exists #{output_path}",
-                            "create table #{output_path} (result string)",
-                            "load data local inpath '#{out_string_filename}' overwrite into table #{output_path};"].join(";")
-        file_hash = {out_string_filename=>out_string}
-        Hive.run(output_table_hql, cluster, node_user, file_hash)
+        out_string = "result\n#{out_string}"
+        Dataset.write_by_url(out_url,out_string,node_user)
       end
-      #unslot worker and create result query
+      #unslot worker
       Hive.unslot_worker_by_path(stage_path)
-      out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
-      Dataset.find_or_create_by_url(out_url)
       out_url
     end
 
@@ -470,7 +467,7 @@ module Mobilize
         #source table
         source_hql = source_dst.path
         out_string = Hive.hql_to_table(cluster, source_hql, target_path, user, drop, schema_hash)
-      elsif source_dst.handler == 'gridfs'
+      elsif ['gridfs','hdfs'].include?(source_dst.handler)
         #tsv from sheet
         source_tsv = source_dst.read(user)
         out_string = Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop, schema_hash)
@@ -481,6 +478,7 @@ module Mobilize
       Hive.unslot_worker_by_path(stage_path)
 
       #output table stores stage output
+      out_string = "result\n#{out_string}"
       output_db,output_table = [Hive.output_db(cluster),stage_path.gridsafe]
       out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
       Dataset.write_by_url(out_url,out_string,node_user)
@@ -489,13 +487,12 @@ module Mobilize
 
     def Hive.read_by_dataset_path(dst_path,user)
       cluster,source_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
-      hql = "select * from #{source_path}"
+      hql = "set hive.cli.print.header=true;select * from #{source_path};"
       Hive.run(hql,cluster,user)
     end
 
-    def Hive.write_by_dataset_path(dst_path,string,user)
+    def Hive.write_by_dataset_path(dst_path,source_tsv,user)
       cluster,target_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
-      source_tsv = "result\n#{string}"
       drop = true
       Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop)
     end

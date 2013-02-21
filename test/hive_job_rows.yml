@@ -20,5 +20,5 @@
   active: true
   trigger: after_hive_test_2
   status: ""
-  stage1: hive.write source:"mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/date/product", drop:true
+  stage1: hive.write source:"mobilize.hive_test_1", target:"mobilize/hive_test_1_copy/act_date/product", drop:true
   stage2: gsheet.write source:"stage1", target:"hive_test_3.out"
