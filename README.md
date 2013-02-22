@@ -214,16 +214,16 @@ hadoop.yml.
 Meta
 ----
 
-* Code: `git clone git://github.com/ngmoco/mobilize-hive.git`
-* Home: <https://github.com/ngmoco/mobilize-hive>
-* Bugs: <https://github.com/ngmoco/mobilize-hive/issues>
+* Code: `git clone git://github.com/dena/mobilize-hive.git`
+* Home: <https://github.com/dena/mobilize-hive>
+* Bugs: <https://github.com/dena/mobilize-hive/issues>
 * Gems: <http://rubygems.org/gems/mobilize-hive>
 
 <a name='section_Author'></a>
 Author
 ------
 
-Cassio Paes-Leme :: cpaesleme@ngmoco.com :: @cpaesleme
+Cassio Paes-Leme :: cpaesleme@dena.com :: @cpaesleme
 
-[mobilize-base]: https://github.com/ngmoco/mobilize-base
-[mobilize-ssh]: https://github.com/ngmoco/mobilize-ssh
+[mobilize-base]: https://github.com/dena/mobilize-base
+[mobilize-ssh]: https://github.com/dena/mobilize-ssh

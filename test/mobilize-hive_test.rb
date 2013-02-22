@@ -52,9 +52,9 @@ describe "Mobilize" do
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
     [hive_3_target_sheet].each{|s| s.delete if s}
 
-    puts "job row added, force enqueued requestor, wait 900s"
+    puts "job row added, force enqueued requestor, wait 1000s"
     r.enqueue!
-    sleep 900
+    sleep 1000
 
     puts "jobtracker posted data to test sheet"
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)
