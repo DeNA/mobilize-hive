@@ -16,6 +16,7 @@ Table Of Contents
   * [Create Job](#section_Start_Create_Job)
   * [Run Test](#section_Start_Run_Test)
 * [Meta](#section_Meta)
+* [Special Thanks](#section_Special_Thanks)
 * [Author](#section_Author)
 
 <a name='section_Overview'></a>
@@ -220,6 +221,14 @@ Meta
 * Home: <https://github.com/dena/mobilize-hive>
 * Bugs: <https://github.com/dena/mobilize-hive/issues>
 * Gems: <http://rubygems.org/gems/mobilize-hive>
+
+<a name='section_Special_Thanks'></a>
+Special Thanks
+--------------
+* This release goes to Toby Negrin, who championed this project with
+DeNA and gave me the support to get it properly architected, tested, and documented.
+* Also many thanks to the Analytics team at DeNA who build and maintain
+our Big Data infrastructure. 
 
 <a name='section_Author'></a>
 Author
