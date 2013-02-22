@@ -102,6 +102,8 @@ in hadoop.yml. Each cluster has:
   * max_slots - defines the total number of simultaneous slots to be
     used for hive jobs on this cluster
   * output_db - defines the db which should be used to hold stage outputs.
+    * This db must have open permissions (777) so any user on the system can
+write to it -- the tables inside will be owned by the users themselves.
   * exec_path - defines the path to the hive executable
 
 Sample hive.yml:
