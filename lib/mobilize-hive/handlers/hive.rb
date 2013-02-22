@@ -84,6 +84,8 @@ module Mobilize
 
     #run a generic hive command, with the option of passing a file hash to be locally available
     def Hive.run(hql,cluster,user,file_hash=nil)
+      # no TempStatsStore
+      hql = "set hive.stats.autogather=false;#{hql}"
       filename = hql.to_md5
       file_hash||= {}
       file_hash[filename] = hql
@@ -101,7 +103,6 @@ module Mobilize
       user = params['user']
       cluster = params['cluster'] || Hive.clusters.keys.first
       node = Hadoop.gateway_node(cluster)
-      node_user = Ssh.host(node)['user']
       if user and !Ssh.sudoers(node).include?(u.name)
         raise "#{u.name} does not have su permissions for #{node}"
       elsif user.nil? and Ssh.su_all_users(node)
@@ -140,17 +141,12 @@ module Mobilize
                             "create table #{output_path} as #{select_hql};"].join(";")
         full_hql = [prior_hql, output_table_hql].compact.join(";")
         Hive.run(full_hql, cluster, user)
-        #make sure node user owns the stage result directory
-        output_table_stats = Hive.table_stats(output_db,output_table,cluster,node_user)
-        output_table_location = output_table_stats['location']
-        chown_command = "#{Hadoop.exec_path(cluster)} fs -chown -R #{node_user} '#{output_table_location}'"
-        Ssh.run(node,chown_command,node_user)
         #already populated, make sure dataset exists
         Dataset.find_or_create_by_url(out_url)
       else
         out_string = Hive.run(hql, cluster, user)
         out_string = "result\n#{out_string}"
-        Dataset.write_by_url(out_url,out_string,node_user)
+        Dataset.write_by_url(out_url,out_string,user)
       end
       #unslot worker
       Hive.unslot_worker_by_path(stage_path)
@@ -442,7 +438,6 @@ module Mobilize
       return false unless slot_id
 
       node = Hadoop.gateway_node(cluster)
-      node_user = Ssh.host(node)['user']
       if user and !Ssh.sudoers(node).include?(u.name)
         raise "#{u.name} does not have su permissions for #{node}"
       elsif user.nil? and Ssh.su_all_users(node)
@@ -498,7 +493,7 @@ module Mobilize
       out_string = "result\n#{out_string}"
       output_db,output_table = [Hive.output_db(cluster),stage_path.gridsafe]
       out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
-      Dataset.write_by_url(out_url,out_string,node_user)
+      Dataset.write_by_url(out_url,out_string,user)
       out_url
     end
 
