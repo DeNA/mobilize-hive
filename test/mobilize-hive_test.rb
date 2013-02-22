@@ -52,9 +52,9 @@ describe "Mobilize" do
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
     [hive_3_target_sheet].each{|s| s.delete if s}
 
-    puts "job row added, force enqueued requestor, wait 600s"
+    puts "job row added, force enqueued requestor, wait 900s"
     r.enqueue!
-    sleep 600
+    sleep 900
 
     puts "jobtracker posted data to test sheet"
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)
@@ -62,13 +62,10 @@ describe "Mobilize" do
     hive_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_2.out",gdrive_slot)
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
 
-    [hive_1_stage_2_target_sheet,
-     hive_1_stage_3_target_sheet,
-     hive_2_target_sheet,
-     hive_3_target_sheet].each do |s|
-      assert s.to_tsv.length == 499
-      sleep 1 
-    end
+    assert hive_1_stage_2_target_sheet.read(u.name).length == 219
+    assert hive_1_stage_3_target_sheet.read(u.name).length == 325
+    assert hive_2_target_sheet.read(u.name).length == 599
+    assert hive_3_target_sheet.read(u.name).length == 347
   end
 
 end

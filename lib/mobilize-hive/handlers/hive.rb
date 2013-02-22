@@ -464,15 +464,20 @@ module Mobilize
 
       #determine source
       source_tsv,source_hql = [nil]*2
-      if source_dst.handler == 'hive'
-        #source table
-        source_hql = "select * from #{source_dst.path};"
-      elsif ['gridfs','hdfs'].include?(source_dst.handler)
-        if source_dst.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
-          source_hql = source_dst.read(user)
-        else
-          #tsv from sheet
-          source_tsv = source_dst.read(user)
+      if params['hql']
+        source_hql = params['hql']
+      elsif source_dst
+        if source_dst.handler == 'hive'
+          #source table
+          cluster,source_path = source_dst.path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
+          source_hql = "select * from #{source_path};"
+        elsif ['gridfs','hdfs'].include?(source_dst.handler)
+          if source_dst.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
+            source_hql = source_dst.read(user)
+          else
+            #tsv from sheet
+            source_tsv = source_dst.read(user)
+          end
         end
       end
 
@@ -498,13 +503,25 @@ module Mobilize
     end
 
     def Hive.read_by_dataset_path(dst_path,user)
-      cluster,source_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
+      cluster,source_path = dst_path.split("/").ie do |sp|
+                                                     if sp.length == 2
+                                                       [Hive.clusters.first.first,sp.join(".")]
+                                                     else
+                                                       [sp.first, sp[1..-1].join(".")]
+                                                     end
+                                                   end
       hql = "set hive.cli.print.header=true;select * from #{source_path};"
       Hive.run(hql,cluster,user)
     end
 
     def Hive.write_by_dataset_path(dst_path,source_tsv,user)
-      cluster,target_path = dst_path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
+      cluster,target_path = dst_path.split("/").ie do |sp|
+                                                     if sp.length == 2
+                                                       [Hive.clusters.first.first,sp.join(".")]
+                                                     else
+                                                       [sp.first, sp[1..-1].join(".")]
+                                                     end
+                                                   end
       drop = true
       Hive.tsv_to_table(cluster, source_tsv, target_path, user, drop)
     end
