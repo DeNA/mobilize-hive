@@ -227,3 +227,4 @@ Cassio Paes-Leme :: cpaesleme@dena.com :: @cpaesleme
 
 [mobilize-base]: https://github.com/dena/mobilize-base
 [mobilize-ssh]: https://github.com/dena/mobilize-ssh
+[mobilize-hdfs]: https://github.com/dena/mobilize-hdfs
