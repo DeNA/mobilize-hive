@@ -210,7 +210,7 @@ hadoop.yml.
     * `hive.write source:"hive://mobilize.hive_test_1",target:"mobilize/hive_test_3/date/product",drop:true`
     * `hive.run hql:"select act_date as ```date```,product,category,value from mobilize.hive_test_1;"`
     * `hive.write source:"stage2",target:"mobilize/hive_test_3/date/product", drop:false`
-    * `gsheet.write source:"hive://mobilize.hive_test_3", target:"hive_test_3.out"`
+    * `gsheet.write source:"hive://mobilize/hive_test_3", target:"hive_test_3.out"`
 
 
 <a name='section_Meta'></a>
