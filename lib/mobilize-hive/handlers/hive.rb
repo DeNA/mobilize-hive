@@ -27,7 +27,7 @@ module Mobilize
     end
 
     def Hive.slot_worker_by_cluster_and_path(cluster,path)
-      working_slots = Mobilize::Resque.jobs.map{|j| j['args'][1]['hive_slot'] if j and j['args']}.compact
+      working_slots = Mobilize::Resque.jobs.map{|j| begin j['args'][1]['hive_slot'];rescue;nil;end}.compact.uniq
       Hive.slot_ids(cluster).each do |slot_id|
         unless working_slots.include?(slot_id)
           Mobilize::Resque.set_worker_args_by_path(path,{'hive_slot'=>slot_id})
