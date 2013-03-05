@@ -406,7 +406,7 @@ module Mobilize
           part_stmt = part_pairs.map{|pp| "#{pp.first}='#{pp.second}'"}.join(",")
           hdfs_dir = "#{target_table_stats['location']}/#{part_dir}"
           hdfs_source_path = "/#{hdfs_dir.split("/")[3..-2].join("/")}/#{base_filename}"
-          hdfs_target_path = "/#{hdfs_dir.split("/")[3..-1].join("/")}/#{base_filename}"
+          hdfs_target_path = "/#{hdfs_dir.split("/")[3..-1].join("/")}"
           #load partition into source path
           puts "Writing to #{hdfs_source_path} for #{user} at #{Time.now.utc}"
           Hdfs.write(hdfs_source_path,tpmv,user)
