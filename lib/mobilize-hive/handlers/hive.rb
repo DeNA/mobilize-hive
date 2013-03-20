@@ -259,7 +259,7 @@ module Mobilize
       temp_db = Hive.output_db(cluster)
       temp_table_name = (source_hql+table_path).to_md5
       temp_table_path = [temp_db,temp_table_name].join(".")
-      temp_set_hql = "set mapred.job.name='#{job_name} (temp table)';"
+      temp_set_hql = "set mapred.job.name=#{job_name} (temp table);"
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
       Hive.run(cluster,temp_create_hql,user_name)
@@ -288,7 +288,7 @@ module Mobilize
                          end.join(",")})"
 
         #always drop when no partititons
-        target_name_hql = "set mapred.job.name='#{job_name}';"
+        target_name_hql = "set mapred.job.name=#{job_name};"
 
         target_drop_hql = "drop table if exists #{table_path};"
 
@@ -334,7 +334,7 @@ module Mobilize
 
         target_part_stmt = part_array.map{|h| "`#{h}`"}.join(",")
 
-        target_set_hql = ["set mapred.job.name='#{job_name}';",
+        target_set_hql = ["set mapred.job.name=#{job_name};",
                           "set hive.exec.dynamic.partition.mode=nonstrict;",
                           "set hive.exec.max.dynamic.partitions.pernode=1000;",
                           "set hive.exec.dynamic.partition=true;",
@@ -578,7 +578,7 @@ module Mobilize
       cluster, db, table = dst_path.split("/")
       source_path = [db,table].join(".")
       job_name = "read #{cluster}/#{db}/#{table}"
-      set_hql = "set hive.cli.print.header=true;set mapred.job.name='#{job_name}';"
+      set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name};"
       select_hql = "select * from #{source_path};"
       hql = [set_hql,select_hql].join
       response = Hive.run(cluster, hql,user_name)
