@@ -7,7 +7,7 @@ Gem::Specification.new do |gem|
   gem.name          = "mobilize-hive"
   gem.version       = Mobilize::Hive::VERSION
   gem.authors       = ["Cassio Paes-Leme"]
-  gem.email         = ["cpaesleme@ngmoco.com"]
+  gem.email         = ["cpaesleme@dena.com"]
   gem.description   = %q{Adds hive read, write, and run support to mobilize-hdfs}
   gem.summary       = %q{Adds hive read, write, and run support to mobilize-hdfs}
   gem.homepage      = "http://github.com/dena/mobilize-hive"
@@ -16,5 +16,5 @@ Gem::Specification.new do |gem|
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
   gem.test_files    = gem.files.grep(%r{^(test|spec|features)/})
   gem.require_paths = ["lib"]
-  gem.add_runtime_dependency "mobilize-hdfs","1.0.10"
+  gem.add_runtime_dependency "mobilize-hdfs","1.2"
 end

@@ -54,7 +54,7 @@ describe "Mobilize" do
 
     puts "job row added, force enqueued requestor, wait 1000s"
     r.enqueue!
-    sleep 1000
+    wait_for_stages
 
     puts "jobtracker posted data to test sheet"
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)
@@ -67,5 +67,30 @@ describe "Mobilize" do
     assert hive_2_target_sheet.read(u.name).length == 599
     assert hive_3_target_sheet.read(u.name).length == 347
   end
+
+  def wait_for_stages(time_limit=600,stage_limit=120,wait_length=10)
+    time = 0
+    time_since_stage = 0
+    #check for 10 min
+    while time < time_limit and time_since_stage < stage_limit
+      sleep wait_length
+      job_classes = Mobilize::Resque.jobs.map{|j| j['class']}
+      if job_classes.include?("Mobilize::Stage")
+        time_since_stage = 0
+        puts "saw stage at #{time.to_s} seconds"
+      else
+        time_since_stage += wait_length
+        puts "#{time_since_stage.to_s} seconds since stage seen"
+      end
+      time += wait_length
+      puts "total wait time #{time.to_s} seconds"
+    end
+
+    if time >= time_limit
+      raise "Timed out before stage completion"
+    end
+  end
+
+
 
 end
