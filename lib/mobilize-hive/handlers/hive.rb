@@ -57,10 +57,11 @@ module Mobilize
       s = Stage.where(:path=>stage_path).first
       params = s.params
       target_path = params['target']
+      cluster = params['cluster'] if Hadoop.clusters.include?(params['cluster'].to_s)
       is_target = true if path == target_path
       red_path = path.split("://").last
       first_path_node = red_path.gsub(".","/").split("/").first
-      cluster =  Hadoop.clusters.include?(first_path_node) ? first_path_node : Hadoop.default_cluster
+      cluster ||= Hadoop.clusters.include?(first_path_node) ? first_path_node : Hadoop.default_cluster
       user_name = Hdfs.user_name_by_stage_path(stage_path,cluster)
       #save some time on targets
       databases = Hive.databases(cluster,user_name) unless is_target

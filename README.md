@@ -146,7 +146,7 @@ Start
       script in the hql or source sheet and returns any output specified at the
       end. If the cmd or last query in source is a select statement, column headers will be
       returned as well.
-  * hive.write `hql:<hql> || source:<source_path>, target:<hive_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>, drop:<true/false>`, 
+  * hive.write `hql:<hql> || source:<source_path>, target:<hive_path>, partitions:<partition_path>, user:<user>, cluster:<cluster>, schema:<gsheet_path>, drop:<true/false>`, 
       which writes the source or query result to the selected hive table.
     * hive_path 
       * should be of the form `<hive_db>/<table_name>` or `<hive_db>.<table_name>`.  
@@ -156,8 +156,10 @@ Start
         * if the file ends in .*ql, it's treated the same as passing hql
         * otherwise it is treated as a tsv with the first row as column headers
     * target:
-      * Partitions can optionally be added to the hive_path, as in `<hive_db>/<table_name>/<partition1>/<partition2>`. 
+      * Should be a hive_path, as in `<hive_db>/<table_name>` or `<hive_db>.<table_name>`.
+    * partitions: 
       * Due to Hive limitation, partition names CANNOT be reserved keywords when writing from tsv (gsheet or hdfs source)
+      * Partitions should be specified as a path, as in  partitions:`<partition1>/<partition2>`.
     * schema:
       * optional. gsheet_path to column schema. 
         * two columns: name, datatype
