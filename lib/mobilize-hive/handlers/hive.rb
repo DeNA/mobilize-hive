@@ -193,7 +193,7 @@ module Mobilize
       else
         result = Hive.run(cluster, hql, user_name)
         Dataset.find_or_create_by_url(out_url)
-        Dataset.write_by_url(out_url,result['stdout']) if result['stdout'].to_s.length>0
+        Dataset.write_by_url(out_url,result['stdout'],user_name) if result['stdout'].to_s.length>0
       end
       #unslot worker
       Hive.unslot_worker_by_path(stage_path)
