@@ -235,11 +235,8 @@ module Mobilize
     def Hive.path_params(cluster, path, user_name)
       db, table, partitions = path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
       #get existing table stats if any
-      curr_stats = begin
-                     Hive.table_stats(cluster, db, table, user_name)
-                   rescue
-                     nil
-                   end
+      response = Hive.table_stats(cluster, db, table, user_name)
+      curr_stats = (response['stdout'] if response['stdout'].length>0)
       {"db"=>db,
        "table"=>table,
        "partitions"=>partitions,
