@@ -336,7 +336,7 @@ module Mobilize
         else
           #get all the permutations of possible partititons
           part_set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name} (permutations);"
-          part_select_hql = "select distinct #{target_part_stmt} from #{source_table_path};"
+          part_select_hql = "select distinct #{target_part_stmt} from #{temp_table_path};"
           part_perm_hql = part_set_hql + part_select_hql
           part_perm_tsv = Hive.run(cluster, part_perm_hql, user_name)['stdout']
           #having gotten the permutations, ensure they are dropped
@@ -352,7 +352,7 @@ module Mobilize
 
         target_insert_hql = "insert overwrite table #{table_path} " +
                             "partition (#{target_part_stmt}) " +
-                            "select #{target_field_stmt},#{target_part_stmt} from #{source_table_path};"
+                            "select #{target_field_stmt},#{target_part_stmt} from #{temp_table_path};"
 
         target_full_hql = [target_set_hql, target_create_hql, target_insert_hql, temp_drop_hql].join
 
