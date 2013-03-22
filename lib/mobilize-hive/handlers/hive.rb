@@ -352,7 +352,9 @@ module Mobilize
 
         else
           #get all the permutations of possible partititons
-          part_perm_hql = "set hive.cli.print.header=true;select distinct #{target_part_stmt} from #{source_table_path};"
+          part_set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name} (permutations);"
+          part_select_hql = "select distinct #{target_part_stmt} from #{source_table_path};"
+          part_perm_hql = part_set_hql + part_select_hql
           part_perm_tsv = Hive.run(cluster, part_perm_hql, user_name)['stdout']
           #having gotten the permutations, ensure they are dropped
           part_hash_array = part_perm_tsv.tsv_to_hash_array
