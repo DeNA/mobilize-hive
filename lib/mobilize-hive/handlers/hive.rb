@@ -108,7 +108,7 @@ module Mobilize
     def Hive.table_stats(cluster,db,table,user_name)
       describe_sql = "use #{db};describe extended #{table};"
       describe_response = Hive.run(cluster, describe_sql,user_name)
-      return describe_response if describe_response['stdout'].length==0
+      return nil if describe_response['stdout'].length==0
       describe_output = describe_response['stdout']
       describe_output.split("location:").last.split(",").first
       #get location, fields, partitions
@@ -232,21 +232,9 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.path_params(cluster, path, user_name)
-      db, table, partitions = path.gsub(".","/").split("/").ie{|sp| [sp.first, sp.second, sp[2..-1]]}
-      #get existing table stats if any
-      response = Hive.table_stats(cluster, db, table, user_name)
-      curr_stats = (response['stdout'] if response['stdout'].length>0)
-      {"db"=>db,
-       "table"=>table,
-       "partitions"=>partitions,
-       "curr_stats"=>curr_stats}
-    end
-
     def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil)
       table_path = [db,table].join(".")
-      target_params = Hive.path_params(cluster, table_path, user_name)
-      table_stats = target_params['curr_stats']
+      table_stats = Hive.table_stats(cluster, db, table, user_name)
 
       source_hql_array = source_hql.split(";")
       last_select_i = source_hql_array.rindex{|hql| hql.downcase.strip.starts_with?("select")}
@@ -264,9 +252,7 @@ module Mobilize
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
       Hive.run(cluster,temp_create_hql,user_name)
 
-      source_params = Hive.path_params(cluster, temp_table_path, user_name)
-      source_table_path = ['db','table'].map{|k| source_params[k]}.join(".")
-      source_table_stats = source_params['curr_stats']
+      source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
       source_fields = source_table_stats['field_defs']
 
       if part_array.length == 0 and
@@ -294,7 +280,7 @@ module Mobilize
 
         target_create_hql = "create table if not exists #{table_path} #{field_def_stmt};"
 
-        target_insert_hql = "insert overwrite table #{table_path} select #{target_field_stmt} from #{source_table_path};"
+        target_insert_hql = "insert overwrite table #{table_path} select #{target_field_stmt} from #{temp_table_path};"
 
         target_full_hql = [target_name_hql,
                            target_drop_hql,
@@ -386,8 +372,7 @@ module Mobilize
       source_headers = source_tsv.tsv_header_array
 
       table_path = [db,table].join(".")
-      target_params = Hive.path_params(cluster, table_path, user_name)
-      table_stats = target_params['curr_stats']
+      table_stats = Hive.table_stats(cluster, db, table, user_name)
 
       schema_hash ||= {}
 
@@ -563,7 +548,7 @@ module Mobilize
                        end
                  {'stdout'=>url,'exit_code'=>0}
                rescue => exc
-                 {'stderr'=>exc.to_s, 'exit_code'=>500}
+                 {'stderr'=>"#{exc.to_s}\n#{exc.backtrace.join("\n")}", 'exit_code'=>500}
                end
 
       #unslot worker and write result
