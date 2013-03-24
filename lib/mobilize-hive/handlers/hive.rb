@@ -152,7 +152,14 @@ module Mobilize
       #at hadoop read limit
       command = "#{Hive.exec_path(cluster)} -S -f #{filename} | head -c #{Hadoop.read_limit}"
       gateway_node = Hadoop.gateway_node(cluster)
-      Ssh.run(gateway_node,command,user_name,file_hash)
+      response = Ssh.run(gateway_node,command,user_name,file_hash)
+      #override exit code 0 when stdout is blank and
+      #stderror contains FAILED or KILLED
+      if response['stdout'].to_s.length == 0 and
+        response['stderr'].to_s.ie{|se| se.index("FAILED") or se.index("KILLED")}
+        response['exit_code'] = 500
+      end
+      return response
     end
 
     def Hive.run_by_stage_path(stage_path)
