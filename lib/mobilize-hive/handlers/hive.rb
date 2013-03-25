@@ -163,6 +163,9 @@ module Mobilize
     end
 
     def Hive.run_by_stage_path(stage_path)
+      gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
+      #return blank response if there are no slots available
+      return nil unless gdrive_slot
       s = Stage.where(:path=>stage_path).first
       params = s.params
       cluster = params['cluster'] || Hive.clusters.keys.first
@@ -181,9 +184,11 @@ module Mobilize
       if params['hql']
         hql = params['hql']
       else
-        source = s.sources.first
-        hql = source.read(user_name)
+        source = s.sources(gdrive_slot).first
+        hql = source.read(user_name,gdrive_slot)
       end
+
+      Gdrive.unslot_worker_by_path(stage_path)
 
       #check for select at end
       hql_array = hql.split(";").map{|hc| hc.strip}.reject{|hc| hc.length==0}
@@ -214,24 +219,24 @@ module Mobilize
     def Hive.schema_hash(schema_path,user_name,gdrive_slot)
       if schema_path.index("/")
         #slashes mean sheets
-        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user_name)
+        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user_name,gdrive_slot)
       else
         u = User.where(:name=>user_name).first
         #check sheets in runner
         r = u.runner
         runner_sheet = r.gbook(gdrive_slot).worksheet_by_title(schema_path)
         out_tsv = if runner_sheet
-                    runner_sheet.read(user_name)
+                    runner_sheet.read(user_name,gdrive_slot)
                   else
                     #check for gfile. will fail if there isn't one.
-                    Gfile.find_by_path(schema_path).read(user_name)
+                    Gfile.find_by_path(schema_path).read(user_name,gdrive_slot)
                   end
       end
       #use Gridfs to cache gdrive results
       file_name = schema_path.split("/").last
       out_url = "gridfs://#{schema_path}/#{file_name}"
       Dataset.write_by_url(out_url,out_tsv,user_name)
-      schema_tsv = Dataset.find_by_url(out_url).read(user_name)
+      schema_tsv = Dataset.find_by_url(out_url).read(user_name,gdrive_slot)
       schema_hash = {}
       schema_tsv.tsv_to_hash_array.each do |ha|
         schema_hash[ha['name']] = ha['datatype']
@@ -488,28 +493,26 @@ module Mobilize
     end
 
     def Hive.write_by_stage_path(stage_path)
+      gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
+      #return blank response if there are no slots available
+      return nil unless gdrive_slot
       s = Stage.where(:path=>stage_path).first
       params = s.params
-      source = s.sources.first
+      source = s.sources(gdrive_slot).first
       target = s.target
       cluster, db, table = target.url.split("://").last.split("/")
+      #slot Hive worker if available
+      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
+      return false unless slot_id
       #update stage with the node so we can use it
       user_name = Hdfs.user_name_by_stage_path(stage_path,cluster)
       job_name = s.path.sub("Runner_","")
 
-      #slot Hive worker if available
-      slot_id = Hive.slot_worker_by_cluster_and_path(cluster,stage_path)
-      return false unless slot_id
-
       schema_hash = if params['schema']
-                      gdrive_slot = Gdrive.slot_worker_by_path(stage_path)
-                      #return blank response if there are no slots available
-                      return nil unless gdrive_slot
                       Hive.schema_hash(params['schema'],user_name,gdrive_slot)
                     else
                       {}
                     end
-      Gdrive.unslot_worker_by_path(stage_path)
       #drop target before create/insert?
       drop = params['drop']
 
@@ -524,14 +527,15 @@ module Mobilize
           source_hql = "select * from #{source_path};"
         elsif ['gsheet','gridfs','hdfs'].include?(source.handler)
           if source.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
-            source_hql = source.read(user_name)
+            source_hql = source.read(user_name,gdrive_slot)
           else
             #tsv from sheet
-            source_tsv = source.read(user_name)
+            source_tsv = source.read(user_name,gdrive_slot)
           end
         end
       end
 
+      Gdrive.unslot_worker_by_path(stage_path)
       part_array = if params['partitions']
                     params['partitions'].to_a.map{|p| p.gsub(".","/").split("/")}.flatten
                   elsif params['target']
