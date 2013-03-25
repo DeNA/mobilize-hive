@@ -52,7 +52,7 @@ module Mobilize
     end
 
     # converts a source path or target path to a dst in the context of handler and stage
-    def Hive.path_to_dst(path,stage_path)
+    def Hive.path_to_dst(path,stage_path,gdrive_slot)
       has_handler = true if path.index("://")
       s = Stage.where(:path=>stage_path).first
       params = s.params
@@ -78,7 +78,7 @@ module Mobilize
         return Dataset.find_or_create_by_url(hive_url)
       end
       #otherwise, use hdfs convention
-      return Ssh.path_to_dst(path,stage_path)
+      return Ssh.path_to_dst(path,stage_path,gdrive_slot)
     end
 
     def Hive.url_by_path(path,user_name,is_target=false)
@@ -219,17 +219,17 @@ module Mobilize
     def Hive.schema_hash(schema_path,user_name,gdrive_slot)
       if schema_path.index("/")
         #slashes mean sheets
-        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user_name,gdrive_slot)
+        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user_name)
       else
         u = User.where(:name=>user_name).first
         #check sheets in runner
         r = u.runner
         runner_sheet = r.gbook(gdrive_slot).worksheet_by_title(schema_path)
         out_tsv = if runner_sheet
-                    runner_sheet.read(user_name,gdrive_slot)
+                    runner_sheet.read(user_name)
                   else
                     #check for gfile. will fail if there isn't one.
-                    Gfile.find_by_path(schema_path).read(user_name,gdrive_slot)
+                    Gfile.find_by_path(schema_path).read(user_name)
                   end
       end
       #use Gridfs to cache gdrive results
