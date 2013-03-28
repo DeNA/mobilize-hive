@@ -262,7 +262,7 @@ module Mobilize
       temp_set_hql = "set mapred.job.name=#{job_name} (temp table);"
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
-      Hive.run(cluster,temp_create_hql,user_name)
+      response = Hive.run(cluster,temp_create_hql,user_name)
       raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
