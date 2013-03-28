@@ -263,6 +263,7 @@ module Mobilize
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
       Hive.run(cluster,temp_create_hql,user_name)
+      raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
       source_fields = source_table_stats['field_defs']
@@ -300,7 +301,9 @@ module Mobilize
                            target_insert_hql,
                            temp_drop_hql].join
 
-        Hive.run(cluster, target_full_hql, user_name)
+        response = Hive.run(cluster, target_full_hql, user_name)
+
+        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       elsif part_array.length > 0 and
         table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']} == part_array}
@@ -350,7 +353,9 @@ module Mobilize
           part_set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name} (permutations);"
           part_select_hql = "select distinct #{target_part_stmt} from #{temp_table_path};"
           part_perm_hql = part_set_hql + part_select_hql
-          part_perm_tsv = Hive.run(cluster, part_perm_hql, user_name)['stdout']
+          response = Hive.run(cluster, part_perm_hql, user_name)
+          raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
+          part_perm_tsv = response['stdout']
           #having gotten the permutations, ensure they are dropped
           part_hash_array = part_perm_tsv.tsv_to_hash_array
           part_drop_hql = part_hash_array.map do |h|
@@ -368,7 +373,8 @@ module Mobilize
 
         target_full_hql = [target_set_hql, target_create_hql, target_insert_hql, temp_drop_hql].join
 
-        Hive.run(cluster, target_full_hql, user_name)
+        response = Hive.run(cluster, target_full_hql, user_name)
+        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
       else
         error_msg = "Incompatible partition specs"
         raise error_msg
@@ -414,7 +420,8 @@ module Mobilize
 
         target_full_hql = [target_drop_hql,target_create_hql,target_insert_hql].join(";")
 
-        Hive.run(cluster, target_full_hql, user_name, file_hash)
+        response = Hive.run(cluster, target_full_hql, user_name, file_hash)
+        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       elsif part_array.length > 0 and
         table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']} == part_array}
@@ -441,7 +448,8 @@ module Mobilize
                             "partitioned by #{partition_defs}"
 
         #create target table early if not here
-        Hive.run(cluster, target_create_hql, user_name)
+        response = Hive.run(cluster, target_create_hql, user_name)
+        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
         table_stats = Hive.table_stats(cluster, db, table, user_name)
 
@@ -480,7 +488,8 @@ module Mobilize
         #run actual partition adds all at once
         if target_part_hql.length>0
           puts "Adding partitions to #{cluster}/#{db}/#{table} for #{user_name} at #{Time.now.utc}"
-          Hive.run(cluster, target_part_hql, user_name)
+          response = Hive.run(cluster, target_part_hql, user_name)
+          raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
         end
       else
         error_msg = "Incompatible partition specs: " +
@@ -488,6 +497,7 @@ module Mobilize
                     "user_params:#{part_array.to_s}"
         raise error_msg
       end
+
       url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
       return url
     end
@@ -580,11 +590,8 @@ module Mobilize
       select_hql = "select * from #{source_path};"
       hql = [set_hql,select_hql].join
       response = Hive.run(cluster, hql,user_name)
-      if response['exit_code']==0
-        return response['stdout']
-      else
-        raise "Unable to read hive://#{dst_path} with error: #{response['stderr']}"
-      end
+      raise "Unable to read hive://#{dst_path} with error: #{response['stderr']}" if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
+      return response['stdout']
     end
 
     def Hive.write_by_dataset_path(dst_path,source_tsv,user_name,*args)
