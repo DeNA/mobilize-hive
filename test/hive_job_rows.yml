@@ -24,3 +24,8 @@
   stage2: hive.write source:"stage1",target:"mobilize/hive_test_3", partitions:"date/product", drop:true
   stage3: hive.write hql:"select * from mobilize.hive_test_3;",target:"mobilize/hive_test_3", partitions:"date/product", drop:false
   stage4: gsheet.write source:"hive://mobilize/hive_test_3", target:"hive_test_3.out"
+- name: hive_test_4
+  active: true
+  trigger: after hive_test_2
+  status: ""
+  stage1: hive.write source:"hive_test_4.in", target:"mobilize/hive_test_4", partitions:"date/product", drop:false
