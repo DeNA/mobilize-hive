@@ -26,9 +26,16 @@ describe "Mobilize" do
     hive_1_in_sheet.write(hive_1_in_tsv,Mobilize::Gdrive.owner_name)
 
     #create blank sheet
-    hive_4_in_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4.in",gdrive_slot)
-    [hive_4_in_sheet].each {|s| s.delete if s}
-    hive_4_in_sheet = Mobilize::Gsheet.find_or_create_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4.in",gdrive_slot)
+    hive_4_stage_1_in_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4_stage_1.in",gdrive_slot)
+    [hive_4_stage_1_in_sheet].each {|s| s.delete if s}
+    hive_4_stage_1_in_sheet = Mobilize::Gsheet.find_or_create_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4_stage_1.in",gdrive_slot)
+
+    #create sheet w just headers
+    hive_4_stage_2_in_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4_stage_2.in",gdrive_slot)
+    [hive_4_stage_2_in_sheet].each {|s| s.delete if s}
+    hive_4_stage_2_in_sheet = Mobilize::Gsheet.find_or_create_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4_stage_2.in",gdrive_slot)
+    hive_4_stage_2_in_sheet_header = hive_1_in_tsv.tsv_header_array.join("\t")
+    hive_4_stage_2_in_sheet.write(hive_4_stage_2_in_sheet_header,Mobilize::Gdrive.owner_name)
 
     hive_1_schema_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1.schema",gdrive_slot)
     [hive_1_schema_sheet].each {|s| s.delete if s}

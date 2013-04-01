@@ -28,4 +28,5 @@
   active: true
   trigger: after hive_test_2
   status: ""
-  stage1: hive.write source:"hive_test_4.in", target:"mobilize/hive_test_4", partitions:"date/product", drop:false
+  stage1: hive.write source:"hive_test_4_stage_1.in", target:"mobilize/hive_test_3", partitions:"date/product"
+  stage2: hive.write source:"hive_test_4_stage_2.in", target:"mobilize/hive_test_3", partitions:"date/product"

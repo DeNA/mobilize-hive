@@ -387,7 +387,7 @@ module Mobilize
     #Accepts options to drop existing target if any
     #also schema with column datatype overrides
     def Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop=false, schema_hash=nil)
-      return nil if source_tsv.trim.length==0
+      return nil if source_tsv.strip.length==0
       source_headers = source_tsv.tsv_header_array
 
       table_path = [db,table].join(".")
@@ -565,6 +565,8 @@ module Mobilize
                          Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash)
                        elsif source_tsv
                          Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop, schema_hash)
+                       elsif source
+                         #null sheet
                        else
                          raise "Unable to determine source tsv or source hql"
                        end
