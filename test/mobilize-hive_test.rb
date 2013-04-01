@@ -66,7 +66,7 @@ describe "Mobilize" do
 
     puts "job row added, force enqueued requestor, wait for stages"
     r.enqueue!
-    wait_for_stages(1200)
+    wait_for_stages(2100)
 
     puts "jobtracker posted data to test sheet"
     hive_1_stage_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_2.out",gdrive_slot)

@@ -306,7 +306,7 @@ module Mobilize
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       elsif part_array.length > 0 and
-        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']} == part_array}
+        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']}.sort == part_array.sort}
         #partitions and no target table or same partitions in both target table and user params
 
         target_headers = source_fields.map{|f| f['name']}.reject{|h| part_array.include?(h)}
@@ -395,6 +395,8 @@ module Mobilize
 
       schema_hash ||= {}
 
+      url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
+
       if part_array.length == 0 and
         table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].nil?}
         #no partitions in either user params or the target table
@@ -425,7 +427,7 @@ module Mobilize
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       elsif part_array.length > 0 and
-        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']} == part_array}
+        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']}.sort == part_array.sort}
         #partitions and no target table
         #or same partitions in both target table and user params
         #or drop and start fresh
@@ -452,11 +454,14 @@ module Mobilize
         response = Hive.run(cluster, target_create_hql, user_name)
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
+        #return url (operation complete) if there's no data
+        source_hash_array = source_tsv.tsv_to_hash_array
+        return url if source_hash_array.length==1 and source_hash_array.first.values.compact.length==0
+
         table_stats = Hive.table_stats(cluster, db, table, user_name)
 
         #create data hash from source hash array
         data_hash = {}
-        source_hash_array = source_tsv.tsv_to_hash_array
         source_hash_array.each do |ha|
           tpmk = part_array.map{|pn| "#{pn}=#{ha[pn]}"}.join("/")
           tpmv = ha.reject{|k,v| part_array.include?(k)}.values.join("\001")
@@ -499,7 +504,6 @@ module Mobilize
         raise error_msg
       end
 
-      url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
       return url
     end
 
