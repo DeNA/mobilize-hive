@@ -192,7 +192,8 @@ module Mobilize
 
       #check for select at end
       hql_array = hql.split(";").map{|hc| hc.strip}.reject{|hc| hc.length==0}
-      if hql_array.last.downcase.starts_with?("select")
+      last_statement = hql_array.last.downcase.split("\n").reject{|l| l.starts_with?("-- ")}.first
+      if last_statement.to_s.starts_with?("select")
         #nil if no prior commands
         prior_hql = hql_array[0..-2].join(";") if hql_array.length > 1
         select_hql = hql_array.last
