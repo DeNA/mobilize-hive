@@ -1,56 +1,7 @@
 module Mobilize
   module Hive
-    def Hive.config
-      Base.config('hive')
-    end
-
-    def Hive.exec_path(cluster)
-      Hive.clusters[cluster]['exec_path']
-    end
-
-    def Hive.output_db(cluster)
-      Hive.clusters[cluster]['output_db']
-    end
-
-    def Hive.output_db_user(cluster)
-      output_db_node = Hadoop.gateway_node(cluster)
-      output_db_user = Ssh.host(output_db_node)['user']
-      output_db_user
-    end
-
-    def Hive.clusters
-      Hive.config['clusters']
-    end
-
-    def Hive.slot_ids(cluster)
-      (1..Hive.clusters[cluster]['max_slots']).to_a.map{|s| "#{cluster}_#{s.to_s}"}
-    end
-
-    def Hive.slot_worker_by_cluster_and_path(cluster,path)
-      working_slots = Mobilize::Resque.jobs.map{|j| begin j['args'][1]['hive_slot'];rescue;nil;end}.compact.uniq
-      Hive.slot_ids(cluster).each do |slot_id|
-        unless working_slots.include?(slot_id)
-          Mobilize::Resque.set_worker_args_by_path(path,{'hive_slot'=>slot_id})
-          return slot_id
-        end
-      end
-      #return false if none are available
-      return false
-    end
-
-    def Hive.unslot_worker_by_path(path)
-      begin
-        Mobilize::Resque.set_worker_args_by_path(path,{'hive_slot'=>nil})
-        return true
-      rescue
-        return false
-      end
-    end
-
-    def Hive.databases(cluster,user_name)
-      Hive.run(cluster,"show databases",user_name)['stdout'].split("\n")
-    end
-
+    #adds convenience methods
+    require "#{File.dirname(__FILE__)}/../helpers/hive_helper"
     # converts a source path or target path to a dst in the context of handler and stage
     def Hive.path_to_dst(path,stage_path,gdrive_slot)
       has_handler = true if path.index("://")
@@ -142,12 +93,25 @@ module Mobilize
     end
 
     #run a generic hive command, with the option of passing a file hash to be locally available
-    def Hive.run(cluster,hql,user_name,file_hash=nil)
+    def Hive.run(cluster,hql,user_name,params=nil,file_hash=nil)
       # no TempStatsStore
       hql = "set hive.stats.autogather=false;#{hql}"
       filename = hql.to_md5
       file_hash||= {}
       file_hash[filename] = hql
+      #add in default params
+      params ||= {}
+      params.merge(Ssh.default_params)
+      #replace any params in the file_hash and command
+      params.each do |k,v|
+        file_hash.each do |name,data|
+          if k.starts_with?("$")
+            data.gsub!(k,v)
+          else
+            data.gsub!("@#{k}",v)
+          end
+        end
+      end
       #silent mode so we don't have logs in stderr; clip output
       #at hadoop read limit
       command = "#{Hive.exec_path(cluster)} -S -f #{filename} | head -c #{Hadoop.read_limit}"
@@ -201,10 +165,10 @@ module Mobilize
                             "drop table if exists #{output_path}",
                             "create table #{output_path} as #{select_hql};"].join(";")
         full_hql = [prior_hql, output_table_hql].compact.join(";")
-        result = Hive.run(cluster,full_hql, user_name)
+        result = Hive.run(cluster,full_hql, user_name,params['params'])
         Dataset.find_or_create_by_url(out_url)
       else
-        result = Hive.run(cluster, hql, user_name)
+        result = Hive.run(cluster, hql, user_name,params['params'])
         Dataset.find_or_create_by_url(out_url)
         Dataset.write_by_url(out_url,result['stdout'],user_name) if result['stdout'].to_s.length>0
       end
@@ -245,7 +209,7 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil)
+    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil, params=nil)
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
       url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
@@ -264,7 +228,7 @@ module Mobilize
       temp_set_hql = "set mapred.job.name=#{job_name} (temp table);"
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
-      response = Hive.run(cluster,temp_create_hql,user_name)
+      response = Hive.run(cluster,temp_create_hql,user_name,params)
       raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
@@ -303,7 +267,7 @@ module Mobilize
                            target_insert_hql,
                            temp_drop_hql].join
 
-        response = Hive.run(cluster, target_full_hql, user_name)
+        response = Hive.run(cluster, target_full_hql, user_name, params)
 
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
@@ -355,7 +319,7 @@ module Mobilize
           part_set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name} (permutations);"
           part_select_hql = "select distinct #{target_part_stmt} from #{temp_table_path};"
           part_perm_hql = part_set_hql + part_select_hql
-          response = Hive.run(cluster, part_perm_hql, user_name)
+          response = Hive.run(cluster, part_perm_hql, user_name, params)
           raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
           part_perm_tsv = response['stdout']
           #having gotten the permutations, ensure they are dropped
@@ -381,7 +345,7 @@ module Mobilize
 
         target_full_hql = [target_set_hql, target_create_hql, target_insert_hql, temp_drop_hql].join
 
-        response = Hive.run(cluster, target_full_hql, user_name)
+        response = Hive.run(cluster, target_full_hql, user_name, params)
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
       else
         error_msg = "Incompatible partition specs"
@@ -435,7 +399,7 @@ module Mobilize
 
         target_full_hql = [target_drop_hql,target_create_hql,target_insert_hql].join(";")
 
-        response = Hive.run(cluster, target_full_hql, user_name, file_hash)
+        response = Hive.run(cluster, target_full_hql, user_name, nil, file_hash)
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       elsif part_array.length > 0 and

@@ -1,5 +1,5 @@
 module Mobilize
   module Hive
-    VERSION = "1.298"
+    VERSION = "1.299"
   end
 end

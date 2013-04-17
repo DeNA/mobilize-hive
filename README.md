@@ -142,6 +142,17 @@ Start
   * cluster and user are optional for all of the below.
     * cluster defaults to the first cluster listed;
     * user is treated the same way as in [mobilize-ssh][mobilize-ssh].
+  * params are also optional for all of the below. They replace HQL in sources.
+    * params are passed as a YML or JSON, as in:
+      * `hive.run source:<source_path>, params:{'date': '2013-03-01', 'unit': 'widgets'}`
+        * this example replaces all the keys, preceded by '@' in all source hqls with the value.
+          * The preceding '@' is used to keep from replacing instances
+            of "date" and "unit" in the HQL; you should have `@date` and `@unit` in your actual HQL 
+            if you'd like to replace those tokens.
+    * in addition, the following params are substituted automatically:
+      * `$utc_date` - replaced with YYYY-MM-DD date, UTC
+      * `$utc_time` - replaced with HH:MM time, UTC
+      * any occurrence of these values in HQL will be replaced at runtime.
   * hive.run `hql:<hql> || source:<gsheet_path>, user:<user>, cluster:<cluster>`, which executes the
       script in the hql or source sheet and returns any output specified at the
       end. If the cmd or last query in source is a select statement, column headers will be
