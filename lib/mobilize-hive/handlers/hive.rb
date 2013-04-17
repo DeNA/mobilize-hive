@@ -248,6 +248,7 @@ module Mobilize
     def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil)
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
+      url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
 
       source_hql_array = source_hql.split(";")
       last_select_i = source_hql_array.rindex{|hql| hql.downcase.strip.starts_with?("select")}
@@ -359,6 +360,12 @@ module Mobilize
           part_perm_tsv = response['stdout']
           #having gotten the permutations, ensure they are dropped
           part_hash_array = part_perm_tsv.tsv_to_hash_array
+          #make sure there is data
+          if part_hash_array.first.nil? or part_hash_array.first.values.include?(nil)
+            #blank result set, return url
+            return url
+          end
+
           part_drop_hql = part_hash_array.map do |h|
             part_drop_stmt = h.map do |name,value|
                                part_defs[name[1..-2]]=="string" ? "#{name}='#{value}'" : "#{name}=#{value}"
@@ -380,7 +387,6 @@ module Mobilize
         error_msg = "Incompatible partition specs"
         raise error_msg
       end
-      url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
       return url
     end
 
@@ -389,6 +395,11 @@ module Mobilize
     #also schema with column datatype overrides
     def Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop=false, schema_hash=nil)
       return nil if source_tsv.strip.length==0
+      if source_tsv.index("\r\n")
+        source_tsv = source_tsv.gsub("\r\n","\n")
+      elsif source_tsv.index("\r")
+        source_tsv = source_tsv.gsub("\r","\n")
+      end
       source_headers = source_tsv.tsv_header_array
 
       table_path = [db,table].join(".")
@@ -541,11 +552,11 @@ module Mobilize
           #source table
           cluster,source_path = source.path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
           source_hql = "select * from #{source_path};"
-        elsif ['gsheet','gridfs','hdfs'].include?(source.handler)
+        elsif ['gsheet','gfile','gridfs','hdfs'].include?(source.handler)
           if source.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
             source_hql = source.read(user_name,gdrive_slot)
           else
-            #tsv from sheet
+            #tsv from sheet or file
             source_tsv = source.read(user_name,gdrive_slot)
           end
         end
