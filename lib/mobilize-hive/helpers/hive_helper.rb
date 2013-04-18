@@ -50,6 +50,14 @@ module Mobilize
     def self.databases(cluster,user_name)
       self.run(cluster,"show databases",user_name)['stdout'].split("\n")
     end
+
+    def self.default_params
+      time = Time.now.utc
+      {
+       '$utc_date'=>time.strftime("%Y-%m-%d"),
+       '$utc_time'=>time.strftime("%H:%M"),
+      }
+    end
   end
 end
 

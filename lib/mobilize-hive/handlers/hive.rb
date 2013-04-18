@@ -101,7 +101,7 @@ module Mobilize
       file_hash[filename] = hql
       #add in default params
       params ||= {}
-      params.merge(Ssh.default_params)
+      params = params.merge(Hive.default_params)
       #replace any params in the file_hash and command
       params.each do |k,v|
         file_hash.each do |name,data|

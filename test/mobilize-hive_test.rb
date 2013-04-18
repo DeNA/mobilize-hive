@@ -63,6 +63,8 @@ describe "Mobilize" do
     [hive_2_target_sheet].each{|s| s.delete if s}
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
     [hive_3_target_sheet].each{|s| s.delete if s}
+    hive_4_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4.out",gdrive_slot)
+    [hive_4_target_sheet].each{|s| s.delete if s}
 
     puts "job row added, force enqueued requestor, wait for stages"
     r.enqueue!
@@ -73,11 +75,13 @@ describe "Mobilize" do
     hive_1_stage_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_1_stage_3.out",gdrive_slot)
     hive_2_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_2.out",gdrive_slot)
     hive_3_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_3.out",gdrive_slot)
+    hive_4_target_sheet = Mobilize::Gsheet.find_by_path("#{r.path.split("/")[0..-2].join("/")}/hive_test_4.out",gdrive_slot)
 
     assert hive_1_stage_2_target_sheet.read(u.name).length == 219
     assert hive_1_stage_3_target_sheet.read(u.name).length > 3
     assert hive_2_target_sheet.read(u.name).length == 599
     assert hive_3_target_sheet.read(u.name).length == 347
+    assert hive_4_target_sheet.read(u.name).length == 432
   end
 
   def wait_for_stages(time_limit=600,stage_limit=120,wait_length=10)
