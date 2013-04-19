@@ -303,7 +303,7 @@ module Mobilize
 
         target_set_hql = ["set mapred.job.name=#{job_name};",
                           "set hive.exec.dynamic.partition.mode=nonstrict;",
-                          "set hive.exec.max.dynamic.partitions.pernode=1000;",
+                          "set hive.exec.max.dynamic.partitions.pernode=10000;",
                           "set hive.exec.dynamic.partition=true;",
                           "set hive.exec.max.created.files = 200000;",
                           "set hive.max.created.files = 200000;"].join
@@ -516,7 +516,7 @@ module Mobilize
           #source table
           cluster,source_path = source.path.split("/").ie{|sp| [sp.first, sp[1..-1].join(".")]}
           source_hql = "select * from #{source_path};"
-        elsif ['gsheet','gfile','gridfs','hdfs'].include?(source.handler)
+        else
           if source.path.ie{|sdp| sdp.index(/\.[A-Za-z]ql$/) or sdp.ends_with?(".ql")}
             source_hql = source.read(user_name,gdrive_slot)
           else
@@ -542,7 +542,8 @@ module Mobilize
 
       result = begin
                  url = if source_hql
-                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash)
+                         #include any params (or nil) at the end
+                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash,params['params'])
                        elsif source_tsv
                          Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop, schema_hash)
                        elsif source
