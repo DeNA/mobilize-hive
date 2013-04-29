@@ -155,8 +155,8 @@ module Mobilize
       Gdrive.unslot_worker_by_path(stage_path)
 
       #check for select at end
-      hql_array = hql.split(";").map{|hc| hc.strip}.reject{|hc| hc.length==0}
-      last_statement = hql_array.last.downcase.split("\n").reject{|l| l.starts_with?("-- ")}.first
+      hql_array = hql.downcase.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";")
+      last_statement = hql_array.last
       if last_statement.to_s.starts_with?("select")
         #nil if no prior commands
         prior_hql = hql_array[0..-2].join(";") if hql_array.length > 1
@@ -209,13 +209,15 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil, params=nil)
+    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil, run_params=nil)
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
       url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
 
-      source_hql_array = source_hql.split(";")
-      last_select_i = source_hql_array.rindex{|hql| hql.downcase.strip.starts_with?("select")}
+      #decomment hql
+
+      source_hql_array = source_hql.downcase.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";")
+      last_select_i = source_hql_array.rindex{|s| s.starts_with?("select")}
       #find the last select query -- it should be used for the temp table creation
       last_select_hql = (source_hql_array[last_select_i..-1].join(";")+";")
       #if there is anything prior to the last select, add it in prior to table creation
@@ -228,7 +230,7 @@ module Mobilize
       temp_set_hql = "set mapred.job.name=#{job_name} (temp table);"
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
-      response = Hive.run(cluster,temp_create_hql,user_name,params)
+      response = Hive.run(cluster,temp_create_hql,user_name,run_params)
       raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
@@ -267,7 +269,7 @@ module Mobilize
                            target_insert_hql,
                            temp_drop_hql].join
 
-        response = Hive.run(cluster, target_full_hql, user_name, params)
+        response = Hive.run(cluster, target_full_hql, user_name, run_params)
 
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
@@ -319,7 +321,7 @@ module Mobilize
           part_set_hql = "set hive.cli.print.header=true;set mapred.job.name=#{job_name} (permutations);"
           part_select_hql = "select distinct #{target_part_stmt} from #{temp_table_path};"
           part_perm_hql = part_set_hql + part_select_hql
-          response = Hive.run(cluster, part_perm_hql, user_name, params)
+          response = Hive.run(cluster, part_perm_hql, user_name, run_params)
           raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
           part_perm_tsv = response['stdout']
           #having gotten the permutations, ensure they are dropped
@@ -332,7 +334,7 @@ module Mobilize
 
           part_drop_hql = part_hash_array.map do |h|
             part_drop_stmt = h.map do |name,value|
-                               part_defs[name[1..-2]]=="string" ? "#{name}='#{value}'" : "#{name}=#{value}"
+                               part_defs[name[1..-2]].downcase=="string" ? "#{name}='#{value}'" : "#{name}=#{value}"
                              end.join(",")
                             "use #{db};alter table #{table} drop if exists partition (#{part_drop_stmt});"
                           end.join
@@ -345,7 +347,7 @@ module Mobilize
 
         target_full_hql = [target_set_hql, target_create_hql, target_insert_hql, temp_drop_hql].join
 
-        response = Hive.run(cluster, target_full_hql, user_name, params)
+        response = Hive.run(cluster, target_full_hql, user_name, run_params)
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
       else
         error_msg = "Incompatible partition specs"
@@ -543,7 +545,8 @@ module Mobilize
       result = begin
                  url = if source_hql
                          #include any params (or nil) at the end
-                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash,params['params'])
+                         run_params = params['params']
+                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash,run_params)
                        elsif source_tsv
                          Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop, schema_hash)
                        elsif source
