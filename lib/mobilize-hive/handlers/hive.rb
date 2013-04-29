@@ -155,9 +155,9 @@ module Mobilize
       Gdrive.unslot_worker_by_path(stage_path)
 
       #check for select at end
-      hql_array = hql.downcase.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";").map{|h| h.strip}
+      hql_array = hql.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";").map{|h| h.strip}
       last_statement = hql_array.last
-      if last_statement.to_s.starts_with?("select")
+      if last_statement.to_s.downcase.starts_with?("select")
         #nil if no prior commands
         prior_hql = hql_array[0..-2].join(";") if hql_array.length > 1
         select_hql = hql_array.last
@@ -216,8 +216,8 @@ module Mobilize
 
       #decomment hql
 
-      source_hql_array = source_hql.downcase.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";").map{|h| h.strip}
-      last_select_i = source_hql_array.rindex{|s| s.starts_with?("select")}
+      source_hql_array = source_hql.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";").map{|h| h.strip}
+      last_select_i = source_hql_array.rindex{|s| s.downcase.starts_with?("select")}
       #find the last select query -- it should be used for the temp table creation
       last_select_hql = (source_hql_array[last_select_i..-1].join(";")+";")
       #if there is anything prior to the last select, add it in prior to table creation
