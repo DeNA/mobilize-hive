@@ -28,7 +28,7 @@ describe "Mobilize" do
     expected_fixture_name = "integration_expected"
     Mobilize::Jobtracker.stop!
     r.enqueue!
-    TestHelper.confirm_expected_jobs(expected_fixture_name)
+    TestHelper.confirm_expected_jobs(expected_fixture_name,2100)
 
     puts "update job status and activity"
     r.update_gsheet(gdrive_slot)
