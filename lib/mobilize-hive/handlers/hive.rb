@@ -181,30 +181,24 @@ module Mobilize
       response
     end
 
-    def Hive.schema_hash(schema_path,user_name,gdrive_slot)
-      if schema_path.index("/")
-        #slashes mean sheets
-        out_tsv = Gsheet.find_by_path(schema_path,gdrive_slot).read(user_name)
+    def Hive.schema_hash(schema_path,stage_path,user_name,gdrive_slot)
+      handler = if schema_path.index("://")
+                  schema_path.split("://").first
+                else
+                  "gsheet"
+                end
+      dst = "Mobilize::#{handler.downcase.capitalize}".constantize.path_to_dst(schema_path,stage_path,gdrive_slot)
+      out_raw = dst.read(user_name,gdrive_slot)
+      #determine the datatype for schema; accept json, yaml, tsv
+      if schema_path.ends_with?(".yml")
+        out_ha = begin;YAML.load(out_raw);rescue ScriptError, StandardError;nil;end if out_ha.nil?
       else
-        u = User.where(:name=>user_name).first
-        #check sheets in runner
-        r = u.runner
-        runner_sheet = r.gbook(gdrive_slot).worksheet_by_title(schema_path)
-        out_tsv = if runner_sheet
-                    runner_sheet.read(user_name)
-                  else
-                    #check for gfile. will fail if there isn't one.
-                    Gfile.find_by_path(schema_path).read(user_name)
-                  end
+        out_ha = begin;JSON.parse(out_raw);rescue ScriptError, StandardError;nil;end
+        out_ha = out_raw.tsv_to_hash_array if out_ha.nil?
       end
-      #use Gridfs to cache gdrive results
-      file_name = schema_path.split("/").last
-      out_url = "gridfs://#{schema_path}/#{file_name}"
-      Dataset.write_by_url(out_url,out_tsv,user_name)
-      schema_tsv = Dataset.find_by_url(out_url).read(user_name,gdrive_slot)
       schema_hash = {}
-      schema_tsv.tsv_to_hash_array.each do |ha|
-        schema_hash[ha['name']] = ha['datatype']
+      out_ha.each do |hash|
+        schema_hash[hash['name']] = hash['datatype']
       end
       schema_hash
     end
@@ -502,7 +496,7 @@ module Mobilize
       job_name = s.path.sub("Runner_","")
 
       schema_hash = if params['schema']
-                      Hive.schema_hash(params['schema'],user_name,gdrive_slot)
+                      Hive.schema_hash(params['schema'],stage_path,user_name,gdrive_slot)
                     else
                       {}
                     end
