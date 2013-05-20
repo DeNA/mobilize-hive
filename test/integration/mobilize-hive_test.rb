@@ -12,7 +12,7 @@ describe "Mobilize" do
     gdrive_slot = u.email
 
     puts "add test data"
-    ["hive1.in","hive4_stage1.in","hive4_stage2.in","hive1.schema","hive1.hql"].each do |fixture_name|
+    ["hive1.in","hive4_stage1.in","hive4_stage2.in","hive1.schema","hive1.sql"].each do |fixture_name|
       target_url = "gsheet://#{r.title}/#{fixture_name}"
       TestHelper.write_fixture(fixture_name, target_url, 'replace')
     end
@@ -34,10 +34,10 @@ describe "Mobilize" do
     r.update_gsheet(gdrive_slot)
 
     puts "check posted data"
-    assert TestHelper.check_output("gsheet://#{r.title}/hive1_stage2.out",'min_length'=>219) == true
-    assert TestHelper.check_output("gsheet://#{r.title}/hive1_stage3.out",'min_length'=>3) == true
-    assert TestHelper.check_output("gsheet://#{r.title}/hive2.out",'min_length'=>599) == true
-    assert TestHelper.check_output("gsheet://#{r.title}/hive3.out",'min_length'=>347) == true
-    assert TestHelper.check_output("gsheet://#{r.title}/hive4.out",'min_length'=>432) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive1_stage2.out", 'min_length' => 219) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive1_stage3.out", 'min_length' => 3) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive2.out", 'min_length' => 599) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive3.out", 'min_length' => 347) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive4.out", 'min_length' => 432) == true
   end
 end

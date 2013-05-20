@@ -5,7 +5,7 @@
   status: ""
   stage1: hive.write target:"mobilize/hive1", partitions:"act_date", drop:true,
             source:"Runner_mobilize(test)/hive1.in", schema:"hive1.schema"
-  stage2: hive.run source:"hive1.hql"
+  stage2: hive.run source:"hive1.sql"
   stage3: hive.run hql:"show databases;"
   stage4: gsheet.write source:"stage2", target:"hive1_stage2.out"
   stage5: gsheet.write source:"stage3", target:"hive1_stage3.out"
