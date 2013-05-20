@@ -94,8 +94,15 @@ module Mobilize
 
     #run a generic hive command, with the option of passing a file hash to be locally available
     def Hive.run(cluster,hql,user_name,params=nil,file_hash=nil)
-      # no TempStatsStore
-      hql = "set hive.stats.autogather=false;#{hql}"
+      preps = Hive.prepends.map do |p|
+                                  prefix = "set "
+                                  suffix = ";"
+                                  prep_out = p
+                                  prep_out = "#{prefix}#{prep_out}" unless prep_out.starts_with?(prefix)
+                                  prep_out = "#{prep_out}#{suffix}" unless prep_out.ends_with?(suffix)
+                                  prep_out
+                                end.join
+      hql = "#{preps}#{hql}"
       filename = hql.to_md5
       file_hash||= {}
       file_hash[filename] = hql

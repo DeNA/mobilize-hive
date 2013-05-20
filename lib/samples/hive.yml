@@ -1,17 +1,23 @@
 ---
 development:
+  prepends:
+    - "hive.stats.autogather=false"
   clusters:
     dev_cluster:
       max_slots: 5
       temp_table_db: mobilize
       exec_path: /path/to/hive
 test:
+  prepends:
+    - "hive.stats.autogather=false"
   clusters:
     test_cluster:
       max_slots: 5
       temp_table_db: mobilize
       exec_path: /path/to/hive
 production:
+  prepends:
+    - "hive.stats.autogather=false"
   clusters:
     prod_cluster:
       max_slots: 5

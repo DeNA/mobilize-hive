@@ -26,6 +26,10 @@ module Mobilize
       (1..self.clusters[cluster]['max_slots']).to_a.map{|s| "#{cluster}_#{s.to_s}"}
     end
 
+    def self.prepends
+      self.config['prepends']
+    end
+
     def self.slot_worker_by_cluster_and_path(cluster,path)
       working_slots = Mobilize::Resque.jobs.map{|j| begin j['args'][1]['hive_slot'];rescue;nil;end}.compact.uniq
       self.slot_ids(cluster).each do |slot_id|
