@@ -30,5 +30,5 @@
   status: ""
   stage1: hive.write source:"hive4_stage1.in", target:"mobilize/hive1", partitions:"act_date"
   stage2: hive.write source:"hive4_stage2.in", target:"mobilize/hive1", partitions:"act_date"
-  stage3: hive.run hql:"select '$utc_date $utc_time' as `date_time`,product,category,value from mobilize.hive1;"
+  stage3: hive.run hql:"select '@date $utc_time' as `date_time`,product,category,value from mobilize.hive1;", params:{'date':'$utc_date'}
   stage4: gsheet.write source:stage3, target:"hive4.out"

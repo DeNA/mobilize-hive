@@ -106,17 +106,17 @@ module Mobilize
       filename = hql.to_md5
       file_hash||= {}
       file_hash[filename] = hql
-      #add in default params
       params ||= {}
-      params = params.merge(Hive.default_params)
       #replace any params in the file_hash and command
       params.each do |k,v|
         file_hash.each do |name,data|
-          if k.starts_with?("$")
-            data.gsub!(k,v)
-          else
-            data.gsub!("@#{k}",v)
-          end
+          data.gsub!("@#{k}",v)
+        end
+      end
+      #add in default params
+      Hive.default_params.each do |k,v|
+        file_hash.each do |name,data|
+          data.gsub!(k,v)
         end
       end
       #silent mode so we don't have logs in stderr; clip output
