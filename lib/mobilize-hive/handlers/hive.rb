@@ -360,8 +360,13 @@ module Mobilize
     #turn a tsv into a hive table.
     #Accepts options to drop existing target if any
     #also schema with column datatype overrides
-    def Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop=false, schema_hash=nil)
-      return nil if source_tsv.strip.length==0
+    def Hive.tsv_to_table(cluster, table_path, user_name, source_tsv)
+      #nil if only header row, or no header row
+      if source_tsv.strip.length==0 or source_tsv.strip.split("\n").length<=1
+        puts "no data in source_tsv for #{cluster}/#{table_path}"
+        return nil
+      end
+      #get rid of freaking carriage return characters
       if source_tsv.index("\r\n")
         source_tsv = source_tsv.gsub("\r\n","\n")
       elsif source_tsv.index("\r")
@@ -369,121 +374,29 @@ module Mobilize
       end
       source_headers = source_tsv.tsv_header_array
 
-      table_path = [db,table].join(".")
-      table_stats = Hive.table_stats(cluster, db, table, user_name)
+      #one file only, strip headers, replace tab with ctrl-a for hive
+      source_rows = source_tsv.split("\n")[1..-1].join("\n").gsub("\t","\001")
+      source_tsv_filename = "000000_0"
+      file_hash = {source_tsv_filename=>source_rows}
 
-      schema_hash ||= {}
+      field_defs = source_headers.map do |name| 
+        "`#{name}` string"
+      end.ie{|fs| "(#{fs.join(",")})"}
 
-      url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
+      #for single insert, use drop table and create table always
+      target_drop_hql = "drop table if exists #{table_path}"
 
-      if part_array.length == 0 and
-        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].nil?}
-        #no partitions in either user params or the target table
-        #or drop and start fresh
+      target_create_hql = "create table #{table_path} #{field_defs}"
 
-        #one file only, strip headers, replace tab with ctrl-a for hive
-        #get rid of freaking carriage return characters
-        source_rows = source_tsv.split("\n")[1..-1].join("\n").gsub("\t","\001")
-        source_tsv_filename = "000000_0"
-        file_hash = {source_tsv_filename=>source_rows}
+      #load source data
+      target_insert_hql = "load data local inpath '#{source_tsv_filename}' overwrite into table #{table_path};"
 
-        field_defs = source_headers.map do |name| 
-          datatype = schema_hash[name] || "string"
-          "`#{name}` #{datatype}"
-        end.ie{|fs| "(#{fs.join(",")})"}
+      target_full_hql = [target_drop_hql,target_create_hql,target_insert_hql].join(";")
 
-        #for single insert, use drop table and create table always
-        target_drop_hql = "drop table if exists #{table_path}"
+      response = Hive.run(cluster, target_full_hql, user_name, nil, file_hash)
+      raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
-        target_create_hql = "create table #{table_path} #{field_defs}"
-
-        #load source data
-        target_insert_hql = "load data local inpath '#{source_tsv_filename}' overwrite into table #{table_path};"
-
-        target_full_hql = [target_drop_hql,target_create_hql,target_insert_hql].join(";")
-
-        response = Hive.run(cluster, target_full_hql, user_name, nil, file_hash)
-        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
-
-      elsif part_array.length > 0 and
-        table_stats.ie{|tts| tts.nil? || drop || tts['partitions'].to_a.map{|p| p['name']}.sort == part_array.sort}
-        #partitions and no target table
-        #or same partitions in both target table and user params
-        #or drop and start fresh
-
-        target_headers = source_headers.reject{|h| part_array.include?(h)}
-
-        field_defs = "(#{target_headers.map do |name|
-                       datatype = schema_hash[name] || "string"
-                       "`#{name}` #{datatype}"
-                     end.join(",")})"
-
-        partition_defs = "(#{part_array.map do |name|
-                           datatype = schema_hash[name] || "string"
-                           "#{name} #{datatype}"
-                         end.join(",")})"
-
-        target_drop_hql = drop ? "drop table if exists #{table_path};" : ""
-
-        target_create_hql = target_drop_hql +
-                            "create table if not exists #{table_path} #{field_defs} " +
-                            "partitioned by #{partition_defs}"
-
-        #create target table early if not here
-        response = Hive.run(cluster, target_create_hql, user_name)
-        raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
-
-        #return url (operation complete) if there's no data
-        source_hash_array = source_tsv.tsv_to_hash_array
-        return url if source_hash_array.length==1 and source_hash_array.first.values.compact.length==0
-
-        table_stats = Hive.table_stats(cluster, db, table, user_name)
-
-        #create data hash from source hash array
-        data_hash = {}
-        source_hash_array.each do |ha|
-          tpmk = part_array.map{|pn| "#{pn}=#{ha[pn]}"}.join("/")
-          tpmv = ha.reject{|k,v| part_array.include?(k)}.values.join("\001")
-          if data_hash[tpmk]
-            data_hash[tpmk] += "\n#{tpmv}"
-          else
-            data_hash[tpmk] = tpmv
-          end
-        end
-
-        #go through completed data hash and write each key value to the table in question
-        target_part_hql = ""
-        data_hash.each do |tpmk,tpmv|
-          base_filename = "000000_0"
-          part_pairs = tpmk.split("/").map{|p| p.split("=").ie{|pa| ["#{pa.first}","#{pa.second}"]}}
-          part_dir = part_pairs.map{|pp| "#{pp.first}=#{pp.second}"}.join("/")
-          part_stmt = part_pairs.map{|pp| "#{pp.first}='#{pp.second}'"}.join(",")
-          hdfs_dir = "#{table_stats['location']}/#{part_dir}"
-          #source the partitions from a parallel load folder since filenames are all named the same
-          hdfs_source_url = "#{table_stats['location']}/part_load/#{part_dir}/#{base_filename}"
-          hdfs_target_url = hdfs_dir
-          #load partition into source path
-          puts "Writing to #{hdfs_source_url} for #{user_name} at #{Time.now.utc}"
-          Hdfs.write(cluster,hdfs_source_url,tpmv,user_name)
-          #let Hive know where the partition is
-          target_add_part_hql = "use #{db};alter table #{table} add if not exists partition (#{part_stmt}) location '#{hdfs_target_url}'"
-          target_insert_part_hql = "load data inpath '#{hdfs_source_url}' overwrite into table #{table} partition (#{part_stmt});"
-          target_part_hql += [target_add_part_hql,target_insert_part_hql].join(";")
-        end
-        #run actual partition adds all at once
-        if target_part_hql.length>0
-          puts "Adding partitions to #{cluster}/#{db}/#{table} for #{user_name} at #{Time.now.utc}"
-          response = Hive.run(cluster, target_part_hql, user_name)
-          raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
-        end
-      else
-        error_msg = "Incompatible partition specs: " +
-                    "target table:#{table_stats['partitions'].to_s}, " +
-                    "user_params:#{part_array.to_s}"
-        raise error_msg
-      end
-
-      return url
+      return true
     end
 
     def Hive.write_by_stage_path(stage_path)
@@ -549,7 +462,16 @@ module Mobilize
                          run_params = params['params']
                          Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash,run_params)
                        elsif source_tsv
-                         Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop, schema_hash)
+                         #first write tsv to temp table
+                         temp_table_path = "#{Hive.output_db(cluster)}.temptsv_#{stage_path.gridsafe}"
+                         has_data = Hive.tsv_to_table(cluster, temp_table_path, user_name, source_tsv)
+                         if has_data
+                           #then do the regular insert, with source hql being select * from temp table
+                           source_hql = "select * from #{temp_table_path}"
+                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash)
+                         else
+                           nil
+                         end
                        elsif source
                          #null sheet
                        else
@@ -584,9 +506,8 @@ module Mobilize
 
     def Hive.write_by_dataset_path(dst_path,source_tsv,user_name,*args)
       cluster,db,table = dst_path.split("/")
-      part_array = []
-      drop = true
-      Hive.tsv_to_table(cluster, db, table, part_array, source_tsv, user_name, drop)
+      table_path = "#{db}.#{table}"
+      Hive.tsv_to_table(cluster, table_path, user_name, source_tsv)
     end
   end
 
