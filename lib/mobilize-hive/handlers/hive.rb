@@ -361,16 +361,16 @@ module Mobilize
     #Accepts options to drop existing target if any
     #also schema with column datatype overrides
     def Hive.tsv_to_table(cluster, table_path, user_name, source_tsv)
-      #nil if only header row, or no header row
-      if source_tsv.strip.length==0 or source_tsv.strip.split("\n").length<=1
-        puts "no data in source_tsv for #{cluster}/#{table_path}"
-        return nil
-      end
       #get rid of freaking carriage return characters
       if source_tsv.index("\r\n")
         source_tsv = source_tsv.gsub("\r\n","\n")
       elsif source_tsv.index("\r")
         source_tsv = source_tsv.gsub("\r","\n")
+      end
+      #nil if only header row, or no header row
+      if source_tsv.strip.length==0 or source_tsv.strip.split("\n").length<=1
+        puts "no data in source_tsv for #{cluster}/#{table_path}"
+        return nil
       end
       source_headers = source_tsv.tsv_header_array
 
