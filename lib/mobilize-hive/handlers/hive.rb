@@ -93,7 +93,7 @@ module Mobilize
     end
 
     #run a generic hive command, with the option of passing a file hash to be locally available
-    def Hive.run(cluster,hql,user_name,params=nil,file_hash=nil)
+    def Hive.run(cluster,hql,user_name,params=nil,file_hash=nil,stage_path=nil)
       preps = Hive.prepends.map do |p|
                                   prefix = "set "
                                   suffix = ";"
@@ -103,7 +103,7 @@ module Mobilize
                                   prep_out
                                 end.join
       hql = "#{preps}#{hql}"
-      filename = hql.to_md5
+      filename = "hql"
       file_hash||= {}
       file_hash[filename] = hql
       params ||= {}
@@ -121,9 +121,9 @@ module Mobilize
       end
       #silent mode so we don't have logs in stderr; clip output
       #at hadoop read limit
-      command = "#{Hive.exec_path(cluster)} -S -f #{filename} | head -c #{Hadoop.read_limit}"
+      command = "#{Hive.exec_path(cluster)} -f #{filename}"
       gateway_node = Hadoop.gateway_node(cluster)
-      response = Ssh.run(gateway_node,command,user_name,file_hash)
+      response = Ssh.run(gateway_node,command,user_name,stage_path,file_hash)
       #override exit code 0 when stdout is blank and
       #stderror contains FAILED or KILLED
       if response['stdout'].to_s.length == 0 and
@@ -147,7 +147,7 @@ module Mobilize
       return false unless slot_id
 
       #output table stores stage output
-      output_db,output_table = [Hive.output_db(cluster),stage_path.gridsafe]
+      output_db,output_table = [Hive.output_db(cluster),job_name.downcase.alphanunderscore]
       output_path = [output_db,output_table].join(".")
       out_url = "hive://#{cluster}/#{output_db}/#{output_table}"
 
@@ -164,6 +164,7 @@ module Mobilize
       #check for select at end
       hql_array = hql.split("\n").reject{|l| l.starts_with?("--") or l.strip.length==0}.join("\n").split(";").map{|h| h.strip}
       last_statement = hql_array.last
+      file_hash = nil
       if last_statement.to_s.downcase.starts_with?("select")
         #nil if no prior commands
         prior_hql = hql_array[0..-2].join(";") if hql_array.length > 1
@@ -172,10 +173,10 @@ module Mobilize
                             "drop table if exists #{output_path}",
                             "create table #{output_path} as #{select_hql};"].join(";")
         full_hql = [prior_hql, output_table_hql].compact.join(";")
-        result = Hive.run(cluster,full_hql, user_name,params['params'])
+        result = Hive.run(cluster,full_hql, user_name,params['params'],file_hash,stage_path)
         Dataset.find_or_create_by_url(out_url)
       else
-        result = Hive.run(cluster, hql, user_name,params['params'])
+        result = Hive.run(cluster, hql, user_name,params['params'],file_hash,stage_path)
         Dataset.find_or_create_by_url(out_url)
         Dataset.write_by_url(out_url,result['stdout'],user_name) if result['stdout'].to_s.length>0
       end
@@ -210,7 +211,8 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop=false, schema_hash=nil, run_params=nil)
+    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop=false, schema_hash=nil, run_params=nil)
+      job_name = stage_path.sub("Runner_","")
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
       url = "hive://" + [cluster,db,table,part_array.compact.join("/")].join("/")
@@ -226,12 +228,13 @@ module Mobilize
 
       #create temporary table so we can identify fields etc.
       temp_db = Hive.output_db(cluster)
-      temp_table_name = (source_hql+table_path).to_md5
+      temp_table_name = "temp_#{job_name.downcase.alphanunderscore}"
       temp_table_path = [temp_db,temp_table_name].join(".")
       temp_set_hql = "set mapred.job.name=#{job_name} (temp table);"
       temp_drop_hql = "drop table if exists #{temp_table_path};"
       temp_create_hql = "#{temp_set_hql}#{prior_hql}#{temp_drop_hql}create table #{temp_table_path} as #{last_select_hql}"
-      response = Hive.run(cluster,temp_create_hql,user_name,run_params)
+      file_hash = nil
+      response = Hive.run(cluster,temp_create_hql,user_name,run_params,file_hash,stage_path)
       raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
 
       source_table_stats = Hive.table_stats(cluster,temp_db,temp_table_name,user_name)
@@ -361,16 +364,16 @@ module Mobilize
     #Accepts options to drop existing target if any
     #also schema with column datatype overrides
     def Hive.tsv_to_table(cluster, table_path, user_name, source_tsv)
-      #nil if only header row, or no header row
-      if source_tsv.strip.length==0 or source_tsv.strip.split("\n").length<=1
-        puts "no data in source_tsv for #{cluster}/#{table_path}"
-        return nil
-      end
       #get rid of freaking carriage return characters
       if source_tsv.index("\r\n")
         source_tsv = source_tsv.gsub("\r\n","\n")
       elsif source_tsv.index("\r")
         source_tsv = source_tsv.gsub("\r","\n")
+      end
+      #nil if only header row, or no header row
+      if source_tsv.strip.length==0 or source_tsv.strip.split("\n").length<=1
+        puts "no data in source_tsv for #{cluster}/#{table_path}"
+        return nil
       end
       source_headers = source_tsv.tsv_header_array
 
@@ -404,6 +407,7 @@ module Mobilize
       #return blank response if there are no slots available
       return nil unless gdrive_slot
       s = Stage.where(:path=>stage_path).first
+      job_name = s.path.sub("Runner_","")
       params = s.params
       source = s.sources(gdrive_slot).first
       target = s.target
@@ -413,7 +417,6 @@ module Mobilize
       return false unless slot_id
       #update stage with the node so we can use it
       user_name = Hdfs.user_name_by_stage_path(stage_path,cluster)
-      job_name = s.path.sub("Runner_","")
 
       schema_hash = if params['schema']
                       Hive.schema_hash(params['schema'],stage_path,user_name,gdrive_slot)
@@ -460,15 +463,15 @@ module Mobilize
                  url = if source_hql
                          #include any params (or nil) at the end
                          run_params = params['params']
-                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash,run_params)
+                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path,drop, schema_hash,run_params)
                        elsif source_tsv
                          #first write tsv to temp table
-                         temp_table_path = "#{Hive.output_db(cluster)}.temptsv_#{stage_path.gridsafe}"
+                         temp_table_path = "#{Hive.output_db(cluster)}.temptsv_#{job_name.downcase.alphanunderscore}"
                          has_data = Hive.tsv_to_table(cluster, temp_table_path, user_name, source_tsv)
                          if has_data
                            #then do the regular insert, with source hql being select * from temp table
                            source_hql = "select * from #{temp_table_path}"
-                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, job_name, drop, schema_hash)
+                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop, schema_hash)
                          else
                            nil
                          end
