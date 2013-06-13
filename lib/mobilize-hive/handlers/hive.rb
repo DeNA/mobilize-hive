@@ -121,7 +121,7 @@ module Mobilize
       end
       #silent mode so we don't have logs in stderr; clip output
       #at hadoop read limit
-      command = "#{Hive.exec_path(cluster)} -S -f #{filename} | head -c #{Hadoop.read_limit}"
+      command = "#{Hive.exec_path(cluster)} -f #{filename}"
       gateway_node = Hadoop.gateway_node(cluster)
       response = Ssh.run(gateway_node,command,user_name,stage_path,file_hash)
       #override exit code 0 when stdout is blank and

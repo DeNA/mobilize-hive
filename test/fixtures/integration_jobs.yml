@@ -3,32 +3,32 @@
   active: true
   trigger: once
   status: ""
-  stage1: hive.write target:"mobilize/hive1", partitions:"act_date", drop:true,
+  stage1: hive.write keep_logs:true, retries:3, target:"mobilize/hive1", partitions:"act_date", drop:true,
             source:"Runner_mobilize(test)/hive1.in", schema:"hive1.schema"
-  stage2: hive.run source:"hive1.sql"
-  stage3: hive.run hql:"show databases;"
+  stage2: hive.run keep_logs:true, retries:3, source:"hive1.sql"
+  stage3: hive.run keep_logs:true, retries:3, hql:"show databases;"
   stage4: gsheet.write source:"stage2", target:"hive1_stage2.out"
   stage5: gsheet.write source:"stage3", target:"hive1_stage3.out"
 - name: hive2
   active: true
   trigger: after hive1
   status: ""
-  stage1: hive.write source:"hdfs://user/mobilize/test/hdfs1.out", target:"mobilize.hive2", drop:true
-  stage2: hive.run hql:"select * from mobilize.hive2;"
+  stage1: hive.write keep_logs:true, retries:3, source:"hdfs://user/mobilize/test/hdfs1.out", target:"mobilize.hive2", drop:true
+  stage2: hive.run keep_logs:true, retries:3, hql:"select * from mobilize.hive2;"
   stage3: gsheet.write source:"stage2", target:"hive2.out"
 - name: hive3
   active: true
   trigger: after hive2
   status: ""
-  stage1: hive.run hql:"select '@date' as `date`,product,category,value from mobilize.hive1;", params:{'date':'2013-01-01'}
-  stage2: hive.write source:"stage1",target:"mobilize/hive3", partitions:"date/product", drop:true
-  stage3: hive.write hql:"select * from mobilize.hive3;",target:"mobilize/hive3", partitions:"date/product", drop:false
+  stage1: hive.run keep_logs:true, retries:3, hql:"select '@date' as `date`,product,category,value from mobilize.hive1;", params:{'date':'2013-01-01'}
+  stage2: hive.write keep_logs:true, retries:3, source:"stage1",target:"mobilize/hive3", partitions:"date/product", drop:true
+  stage3: hive.write keep_logs:true, retries:3, hql:"select * from mobilize.hive3;",target:"mobilize/hive3", partitions:"date/product", drop:false
   stage4: gsheet.write source:"hive://mobilize/hive3", target:"hive3.out"
 - name: hive4
   active: true
   trigger: after hive3
   status: ""
-  stage1: hive.write source:"hive4_stage1.in", target:"mobilize/hive1", partitions:"act_date"
-  stage2: hive.write source:"hive4_stage2.in", target:"mobilize/hive1", partitions:"act_date"
-  stage3: hive.run hql:"select '@date $utc_time' as `date_time`,product,category,value from mobilize.hive1;", params:{'date':'$utc_date'}
+  stage1: hive.write keep_logs:true, retries:3, source:"hive4_stage1.in", target:"mobilize/hive1", partitions:"act_date"
+  stage2: hive.write keep_logs:true, retries:3, source:"hive4_stage2.in", target:"mobilize/hive1", partitions:"act_date"
+  stage3: hive.run keep_logs:true, retries:3, hql:"select '@date $utc_time' as `date_time`,product,category,value from mobilize.hive1;", params:{'date':'$utc_date'}
   stage4: gsheet.write source:stage3, target:"hive4.out"
