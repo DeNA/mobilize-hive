@@ -153,10 +153,10 @@ module Mobilize
 
       #get hql
       if params['hql']
-        hql = params['hql']
+        hql = params['hql'].strip
       else
         source = s.sources(gdrive_slot).first
-        hql = source.read(user_name,gdrive_slot)
+        hql = source.read(user_name,gdrive_slot).strip
       end
 
       Gdrive.unslot_worker_by_path(stage_path)
