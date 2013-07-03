@@ -5,7 +5,7 @@ development:
   clusters:
     dev_cluster:
       max_slots: 5
-      temp_table_db: mobilize
+      output_db: mobilize
       exec_path: /path/to/hive
 test:
   prepends:
@@ -13,7 +13,7 @@ test:
   clusters:
     test_cluster:
       max_slots: 5
-      temp_table_db: mobilize
+      output_db: mobilize
       exec_path: /path/to/hive
 production:
   prepends:
@@ -21,5 +21,5 @@ production:
   clusters:
     prod_cluster:
       max_slots: 5
-      temp_table_db: mobilize
+      output_db: mobilize
       exec_path: /path/to/hive
