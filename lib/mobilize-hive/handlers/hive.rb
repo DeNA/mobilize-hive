@@ -211,7 +211,7 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop=false, schema_hash=nil, run_params=nil)
+    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop=false, schema_hash=nil, run_params=nil,compress=false)
       job_name = stage_path.sub("Runner_","")
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
@@ -261,6 +261,12 @@ module Mobilize
         #always drop when no partititons
         target_name_hql = "set mapred.job.name=#{job_name};"
 
+        if compress
+          target_name_hql = target_name_hql+["set hive.exec.compress.output=true;",
+                          "set mapred.output.compression.codec=org.apache.hadoop.io.compress.SnappyCodec;",
+                          "set mapred.output.compression.type=BLOCK;"].join
+        end
+
         target_drop_hql = "drop table if exists #{table_path};"
 
         target_create_hql = "create table if not exists #{table_path} #{field_def_stmt};"
@@ -273,6 +279,10 @@ module Mobilize
                            target_insert_hql,
                            temp_drop_hql].join
 
+
+        puts "FULL HQL QUERY: " + target_full_hql
+
+        
         response = Hive.run(cluster, target_full_hql, user_name, run_params)
 
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
@@ -313,6 +323,11 @@ module Mobilize
                           "set hive.exec.dynamic.partition=true;",
                           "set hive.exec.max.created.files = 200000;",
                           "set hive.max.created.files = 200000;"].join
+        if compress
+          target_set_hql = target_set_hql+["set hive.exec.compress.output=true;",
+                          "set mapred.output.compression.codec=org.apache.hadoop.io.compress.SnappyCodec;",
+                          "set mapred.output.compression.type=BLOCK;"].join
+        end
 
         if drop or table_stats.nil?
           target_drop_hql = "drop table if exists #{table_path};"
@@ -350,6 +365,8 @@ module Mobilize
                             "select #{target_field_stmt},#{target_part_stmt} from #{temp_table_path};"
 
         target_full_hql = [target_set_hql, target_create_hql, target_insert_hql, temp_drop_hql].join
+
+        puts "FULL HQL QUERY: " + target_full_hql
 
         response = Hive.run(cluster, target_full_hql, user_name, run_params)
         raise response['stderr'] if response['stderr'].to_s.ie{|s| s.index("FAILED") or s.index("KILLED")}
@@ -425,6 +442,7 @@ module Mobilize
                     end
       #drop target before create/insert?
       drop = params['drop']
+      compress = params['compress']
 
       #determine source
       source_tsv,source_hql = [nil]*2
@@ -463,7 +481,7 @@ module Mobilize
                  url = if source_hql
                          #include any params (or nil) at the end
                          run_params = params['params']
-                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path,drop, schema_hash,run_params)
+                         Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path,drop, schema_hash,run_params,compress)
                        elsif source_tsv
                          #first write tsv to temp table
                          temp_table_path = "#{Hive.output_db(cluster)}.temptsv_#{job_name.downcase.alphanunderscore}"
@@ -471,7 +489,7 @@ module Mobilize
                          if has_data
                            #then do the regular insert, with source hql being select * from temp table
                            source_hql = "select * from #{temp_table_path}"
-                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop, schema_hash)
+                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop, schema_hash,compress)
                          else
                            nil
                          end
