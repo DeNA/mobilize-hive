@@ -489,7 +489,7 @@ module Mobilize
                          if has_data
                            #then do the regular insert, with source hql being select * from temp table
                            source_hql = "select * from #{temp_table_path}"
-                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop, schema_hash,compress)
+                           Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop, schema_hash,nil,compress)
                          else
                            nil
                          end
