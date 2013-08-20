@@ -6,11 +6,12 @@ require 'mobilize-hive/version'
 Gem::Specification.new do |gem|
   gem.name          = "mobilize-hive"
   gem.version       = Mobilize::Hive::VERSION
-  gem.authors       = ["Cassio Paes-Leme"]
-  gem.email         = ["cpaesleme@dena.com"]
+  gem.authors       = ["Cassio Paes-Leme", "Ryosuke IWANAGA"]
+  gem.email         = ["cpaesleme@dena.com", "riywo.jp@gmail.com"]
+  gem.license       = "Apache License, Version 2.0"
+  gem.homepage      = "http://github.com/DeNA/mobilize-hive"
   gem.description   = %q{Adds hive read, write, and run support to mobilize-hdfs}
   gem.summary       = %q{Adds hive read, write, and run support to mobilize-hdfs}
-  gem.homepage      = "http://github.com/dena/mobilize-hive"
 
   gem.files         = `git ls-files`.split($/)
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
