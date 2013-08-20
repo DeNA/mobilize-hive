@@ -338,10 +338,11 @@ module Mobilize
 
           part_drop_hql = part_hash_array.map do |h|
             part_drop_stmt = h.map do |name,value|
-                               part_defs[name[1..-2]].downcase=="string" ? "#{name}='#{value}'" : "#{name}=#{value}"
+                               column = name.gsub(/^`(.+)`$/) { $1 }
+                               part_defs[column].downcase=="string" ? "#{name}='#{value}'" : "#{name}=#{value}"
                              end.join(",")
-                            "use #{db};alter table #{table} drop if exists partition (#{part_drop_stmt});"
-                          end.join
+            "use #{db};alter table #{table} drop if exists partition (#{part_drop_stmt});"
+          end.join
           target_create_hql = part_drop_hql
         end
 
