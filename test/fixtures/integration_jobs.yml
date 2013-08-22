@@ -32,3 +32,12 @@
   stage2: hive.write save_logs:true, retries:3, source:"hive4_stage2.in", target:"mobilize/hive1", partitions:"act_date"
   stage3: hive.run save_logs:true, retries:3, hql:"select '@date $utc_time' as `date_time`,product,category,value from mobilize.hive1;", params:{'date':'$utc_date'}
   stage4: gsheet.write source:stage3, target:"hive4.out"
+- name: hive5
+  active: true
+  trigger: after hive4
+  status: ""
+  stage1: hive.write save_logs:true, retries:3, source:"hive5.in", target:"mobilize/hive5_in", drop:true
+  stage2: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-01'}, drop:true
+  stage3: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-02'}, compress:true
+  stage4: hive.run save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5;"
+  stage5: gsheet.write source:stage4, target:"hive5.out"
