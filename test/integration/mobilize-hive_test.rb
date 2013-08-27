@@ -20,7 +20,7 @@ describe "Mobilize" do
     assert Mobilize::Jobtracker.workers.length == Mobilize::Resque.config['max_workers'].to_i
 
     puts "add test data"
-    ["hive1.in","hive4_stage1.in","hive4_stage2.in","hive1.schema","hive1.sql"].each do |fixture_name|
+    ["hive1.in","hive4_stage1.in","hive4_stage2.in","hive1.schema","hive1.sql", "hive5.in"].each do |fixture_name|
       target_url = "gsheet://#{r.title}/#{fixture_name}"
       TestHelper.write_fixture(fixture_name, target_url, 'replace')
     end
@@ -47,5 +47,6 @@ describe "Mobilize" do
     assert TestHelper.check_output("gsheet://#{r.title}/hive2.out", 'min_length' => 599) == true
     assert TestHelper.check_output("gsheet://#{r.title}/hive3.out", 'min_length' => 347) == true
     assert TestHelper.check_output("gsheet://#{r.title}/hive4.out", 'min_length' => 432) == true
+    assert TestHelper.check_output("gsheet://#{r.title}/hive5.out", 'min_length' => 500) == true
   end
 end
