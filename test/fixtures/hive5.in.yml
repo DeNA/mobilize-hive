@@ -1,0 +1,9 @@
+---
+- act_date: 2013-01-01
+  product: product1
+  category: category1
+  value: 7
+- act_date: 2013-01-02
+  product: product1
+  category: category1
+  value: 8
