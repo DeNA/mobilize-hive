@@ -211,7 +211,7 @@ module Mobilize
       schema_hash
     end
 
-    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop=false, schema_hash=nil, run_params=nil,compress=false)
+    def Hive.hql_to_table(cluster, db, table, part_array, source_hql, user_name, stage_path, drop=false, schema_hash=nil, run_params=nil,compress=true)
       job_name = stage_path.sub("Runner_","")
       table_path = [db,table].join(".")
       table_stats = Hive.table_stats(cluster, db, table, user_name)
@@ -443,7 +443,7 @@ module Mobilize
                     end
       #drop target before create/insert?
       drop = params['drop']
-      compress = params['compress']
+      compress = params.has_key?('compress') ? params['compress'] : true
 
       #determine source
       source_tsv,source_hql = [nil]*2
