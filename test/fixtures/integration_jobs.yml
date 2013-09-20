@@ -13,7 +13,7 @@
   active: true
   trigger: after hive1
   status: ""
-  stage1: hive.write save_logs:true, retries:3, source:"hdfs://user/mobilize/test/hdfs1.out", target:"mobilize.hive2", drop:true
+  stage1: hive.write save_logs:true, retries:3, source:"hdfs://user/mobilize/test/hdfs1.out", target:"mobilize.hive2", drop:true, compress:true
   stage2: hive.run save_logs:true, retries:3, hql:"select * from mobilize.hive2;"
   stage3: gsheet.write source:"stage2", target:"hive2.out"
 - name: hive3
@@ -22,7 +22,7 @@
   status: ""
   stage1: hive.run save_logs:true, retries:3, hql:"select '@date' as `date`,product,category,value from mobilize.hive1;", params:{'date':'2013-01-01'}
   stage2: hive.write save_logs:true, retries:3, source:"stage1",target:"mobilize/hive3", partitions:"date/product", drop:true
-  stage3: hive.write save_logs:true, retries:3, hql:"select * from mobilize.hive3;",target:"mobilize/hive3", partitions:"date/product", drop:false
+  stage3: hive.write save_logs:true, retries:3, hql:"select * from mobilize.hive3;",target:"mobilize/hive3", partitions:"date/product", drop:false, compress:true
   stage4: gsheet.write source:"hive://mobilize/hive3", target:"hive3.out"
 - name: hive4
   active: true
@@ -37,7 +37,7 @@
   trigger: after hive4
   status: ""
   stage1: hive.write save_logs:true, retries:3, source:"hive5.in", target:"mobilize/hive5_in", drop:true
-  stage2: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-01'}, drop:true, compress:false
-  stage3: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-02'}
+  stage2: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-01'}, drop:true
+  stage3: hive.write save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5_in where act_date='@date'", target:"mobilize/hive5", partitions:"act_date", params:{'date':'2013-01-02'}, compress:true
   stage4: hive.run save_logs:true, retries:3, hql:"select act_date,product,category,value from mobilize.hive5;"
   stage5: gsheet.write source:stage4, target:"hive5.out"
