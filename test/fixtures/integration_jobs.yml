@@ -20,7 +20,9 @@
   active: true
   trigger: after hive2
   status: ""
-  stage1: hive.run save_logs:true, retries:3, hql:"select '@date' as `date`,product,category,value from mobilize.hive1;", params:{'date':'2013-01-01'}
+  stage1: |-
+    hive.run save_logs:true, retries:3, hql:"select '@date' as `date`,product,category,value
+    from mobilize.hive1;", params:{'date':'2013-01-01'}
   stage2: hive.write save_logs:true, retries:3, source:"stage1",target:"mobilize/hive3", partitions:"date/product", drop:true
   stage3: hive.write save_logs:true, retries:3, hql:"select * from mobilize.hive3;",target:"mobilize/hive3", partitions:"date/product", drop:false, compress:true
   stage4: gsheet.write source:"hive://mobilize/hive3", target:"hive3.out"
