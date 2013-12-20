@@ -66,9 +66,9 @@ module Mobilize
       result_hash = {}
       result_hash['location'] = describe_output.split("location:").last.split(",").first
       #get fields
-      field_defs = describe_output.split(" \nDetailed Table Information").first.split(
+      field_defs = describe_output.split(/\n(Detailed Table Information|# Partition Information)/).first.split(
                                          "\n").map{|f|
-                                         f.strip.split("\t").ie{|fa|
+                                         f.strip.split(/[\t\s]+/).ie{|fa|
                                          {"name"=>fa.first,"datatype"=>fa.second} if fa.first}}.compact
       #check for partititons
       if describe_output.index("partitionKeys:[FieldSchema")
@@ -103,6 +103,7 @@ module Mobilize
                                   prep_out
                                 end.join
       hql = "#{preps}#{hql}"
+      puts "FULL HQL QUERY: " + hql
       filename = "hql"
       file_hash||= {}
       file_hash[filename] = hql
